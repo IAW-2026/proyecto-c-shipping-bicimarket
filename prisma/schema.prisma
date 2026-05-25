@@ -1,0 +1,24 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// Local mirror of the user that authenticated via this app's Clerk.
+// Created/updated lazily on each authenticated request (see src/lib/auth.ts).
+// Each fork extends this model with its own domain entities (e.g. buyer_profile,
+// seller_profile, logistics_operator) referencing User.id as the clerk_user_id.
+model User {
+  id        String   @id
+  email     String   @unique
+  firstName String?
+  lastName  String?
+  imageUrl  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
