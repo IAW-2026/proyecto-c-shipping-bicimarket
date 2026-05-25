@@ -36,6 +36,7 @@ Stack (confirmado en `package.json`):
 3. **Provisioning perezoso de usuarios**: en el primer request autenticado, el middleware/page lee el JWT y hace upsert en la DB local. No usar webhook de Clerk. Patrón en `src/lib/auth.ts:getOrCreateLocalUser()`.
 4. **Auth de llamadas inter-apps**: `X-Service-Token: <secret>`. Patrón en `src/lib/service-auth.ts` (`requireServiceToken` para inbound, `callServiceApi` para outbound).
 5. **Versionado de API**: prefijo `/api/v1/...` para endpoints de negocio. `/api/internal/...` para endpoints server-to-server puros (sin equivalente público). `/api/health` para healthcheck. **No** hay `/webhooks/` en Shipping.
+   - **Middleware**: `/api/v1/(.*)` y `/api/internal/(.*)` están como rutas **públicas** en `middleware.ts` (Clerk NO enforce JWT a nivel middleware). Cada route handler decide internamente: `auth()` para JWT, `requireServiceToken(req)` para S2S, o ambos según el endpoint. Esto evita pelearse con Clerk para los endpoints S2S.
 6. **Snapshots inmutables** cuando guardamos datos cuya verdad vive en otra app (precio, dirección, nombre): nunca actualizarlos.
 7. **Montos en centavos** (`amount_cents: int`). Currency siempre `"ARS"`.
 8. **IDs con prefijo** estilo Stripe — prefijos propios de Shipping: `shp_`, `qte_`, `pkg_`, `evt_`, `dla_`, `prf_`, `lop_`, `rat_`, `ssh_`. Refs opacas a otras apps: `ord_`, `osg_`, `sor_`, `slp_`, `byp_`, `pay_`.
