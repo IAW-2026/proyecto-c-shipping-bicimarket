@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
-import { isAdmin } from "@/lib/auth-helpers";
+import { requireAdmin } from "@/lib/auth-helpers";
 import { ApiError, handleApiError } from "@/lib/api-error";
 import { patchAssignmentSchema } from "@/validation/assignments";
 import { OperatorStatus } from "@/generated/prisma/enums";
@@ -24,7 +24,7 @@ export async function PATCH(
     const { assignmentId, shipmentId } = await params;
 
     const { userId, sessionClaims } = await auth();
-    if (!userId || !isAdmin(sessionClaims)) {
+    if (!userId || !(await requireAdmin(sessionClaims))) {
       throw new ApiError("FORBIDDEN", 403, "Admin requerido");
     }
 

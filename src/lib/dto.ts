@@ -97,6 +97,7 @@ export function toTrackingEventDTO(e: TrackingEventModel): TrackingEventDTO {
 
 export function toAssignmentDTO(
   s: ShipmentModel & { packages: PackageModel[] },
+  isSelfAssigned: boolean,
 ): AssignmentDTO {
   return {
     id: s.id,
@@ -106,5 +107,6 @@ export function toAssignmentDTO(
     shipping_address: s.shippingAddressSnapshot as unknown as Address,
     weight_grams_total: s.weightGramsTotal,
     packages_count: s.packages.length,
+    is_self_assigned: isSelfAssigned,
   };
 }

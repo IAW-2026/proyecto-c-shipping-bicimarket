@@ -1,16 +1,15 @@
-import Link from "next/link";
-import { buttonVariants } from "@/components/ui/button";
+import { SearchX } from "lucide-react";
+import { ErrorPageLayout } from "@/components/feedback/ErrorPageLayout";
 
 export default function NotFound() {
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-4">
-      <h1 className="text-6xl font-bold">404</h1>
-      <p className="text-lg text-muted-foreground">
-        La pagina que buscas no existe.
-      </p>
-      <Link href="/" className={buttonVariants()}>
-        Volver al inicio
-      </Link>
-    </main>
+    <ErrorPageLayout
+      icon={SearchX}
+      tone="neutral"
+      eyebrow="Error 404"
+      title="No encontramos lo que buscás"
+      subtitle="La página o el recurso no existe. Revisá el link o volvé al inicio."
+      cta={{ label: "Ir al inicio", href: "/" }}
+    />
   );
 }

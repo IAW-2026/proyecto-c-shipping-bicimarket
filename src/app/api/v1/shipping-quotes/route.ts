@@ -1,5 +1,9 @@
 // POST /api/v1/shipping-quotes — SH1 (docs/03)
 // Auth: S2S (X-Service-Token). Lo llama Buyer App durante el checkout.
+//
+// Usa el quote-engine que matchea (distancia × peso × service_level)
+// contra `shipping_rates`. La distancia se calcula con Haversine sobre
+// los CPs origen y destino (ver src/lib/geo/).
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
@@ -9,6 +13,7 @@ import { ApiError, handleApiError } from "@/lib/api-error";
 import { getMockPickupAddress } from "@/lib/mocks";
 import { toShippingQuoteDTO } from "@/lib/dto";
 import { createQuoteSchema } from "@/validation/shipping-quotes";
+import { findMatchingRate } from "@/lib/quote-engine";
 
 const QUOTE_TTL_MS = 60 * 60 * 1000; // 60 min
 
@@ -35,30 +40,21 @@ export async function POST(req: NextRequest) {
       0,
     );
 
-    // Matching simple por prefijo postal (primeros 3 chars).
-    // Tarifa válida: cubre el peso total y el service_level pedido.
-    const fromPrefix = pickupAddress.postal_code.slice(0, 3);
-    const toPrefix = body.to.postal_code.slice(0, 3);
-
-    const rate = await prisma.shippingRate.findFirst({
-      where: {
-        active: true,
-        serviceLevel: body.service_level,
-        fromPostalPrefix: fromPrefix,
-        toPostalPrefix: toPrefix,
-        weightGramsMin: { lte: weightGramsTotal },
-        weightGramsMax: { gte: weightGramsTotal },
-      },
+    // Motor de matching: si los CPs no están en el dataset tira 422
+    // POSTAL_CODE_UNKNOWN; si no hay rate para esa combinación devuelve null.
+    const matched = await findMatchingRate({
+      pickupPostalCode: pickupAddress.postal_code,
+      shippingPostalCode: body.to.postal_code,
+      weightGramsTotal,
+      serviceLevel: body.service_level,
     });
 
-    if (!rate) {
+    if (!matched) {
       throw new ApiError(
         "RATE_NOT_FOUND",
         422,
         "No hay tarifa disponible para esos parámetros",
         {
-          from_postal_prefix: fromPrefix,
-          to_postal_prefix: toPrefix,
           weight_grams_total: weightGramsTotal,
           service_level: body.service_level,
         },
@@ -72,13 +68,13 @@ export async function POST(req: NextRequest) {
         fromAddressSnapshot: pickupAddress as unknown as object,
         toAddressSnapshot: body.to as unknown as object,
         serviceLevel: body.service_level,
-        carrier: rate.carrier,
-        costCents: rate.costCents,
+        carrier: matched.carrier,
+        costCents: matched.costCents,
         weightGramsTotal,
         packagesCount: body.packages.length,
         packagesSnapshot: body.packages as unknown as object,
-        estimatedDaysMin: rate.estimatedDaysMin,
-        estimatedDaysMax: rate.estimatedDaysMax,
+        estimatedDaysMin: matched.estimatedDaysMin,
+        estimatedDaysMax: matched.estimatedDaysMax,
         idempotencyKey: idempotencyKey ?? null,
         expiresAt: new Date(Date.now() + QUOTE_TTL_MS),
       },

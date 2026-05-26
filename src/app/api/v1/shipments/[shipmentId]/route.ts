@@ -5,7 +5,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
 import { requireServiceToken } from "@/lib/service-auth";
-import { isAdmin, getActiveOperator } from "@/lib/auth-helpers";
+import { requireAdmin, getActiveOperator } from "@/lib/auth-helpers";
 import { ApiError, handleApiError } from "@/lib/api-error";
 import { generateId } from "@/lib/ids";
 import { toShipmentDTO } from "@/lib/dto";
@@ -52,7 +52,7 @@ export async function PATCH(
     const { userId, sessionClaims } = await auth();
     if (!userId) throw new ApiError("UNAUTHORIZED", 401, "Auth requerida");
 
-    const admin = isAdmin(sessionClaims);
+    const admin = await requireAdmin(sessionClaims);
     const operator = admin ? null : await getActiveOperator();
     if (!admin && !operator) {
       throw new ApiError("FORBIDDEN", 403, "Admin u operador activo requerido");

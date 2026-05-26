@@ -7,7 +7,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
 import { requireServiceToken } from "@/lib/service-auth";
-import { isAdmin } from "@/lib/auth-helpers";
+import { requireAdmin } from "@/lib/auth-helpers";
 import { generateId, generateTrackingNumber } from "@/lib/ids";
 import { ApiError, handleApiError } from "@/lib/api-error";
 import { paginate } from "@/lib/pagination";
@@ -185,7 +185,7 @@ export async function GET(req: NextRequest) {
 
     // Modo JWT admin: filtros ricos para la tabla admin
     const { userId, sessionClaims } = await auth();
-    if (!userId || !isAdmin(sessionClaims)) {
+    if (!userId || !(await requireAdmin(sessionClaims))) {
       throw new ApiError("FORBIDDEN", 403, "Admin requerido");
     }
 

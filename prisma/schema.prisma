@@ -118,15 +118,19 @@ model LogisticsOperator {
 }
 
 // ─── 2. ShippingRate (config) ──────────────────────────────────────────────
-// Tarifario por (peso, zona, service_level). Seed mínimo del sprint 1:
-// 18 filas = 3 niveles de peso × 2 zonas (CABA-CABA, CABA-GBA) × 3 service_levels.
+// Tarifaría por (distancia km, peso, service_level).
+// La distancia se calcula con Haversine entre el lat/lng del CP origen y
+// destino (ver src/lib/geo/distance.ts). El motor de matching está en
+// src/lib/quote-engine.ts.
+// Seed: 45 filas (5 rangos km × 3 rangos peso × 3 service_levels), con
+// algunas filas de same_day inactivas para distancias largas.
 
 model ShippingRate {
   id               String       @id // rat_…
   carrier          String // "andreani" | "oca" | "propio"
   serviceLevel     ServiceLevel @map("service_level")
-  fromPostalPrefix String       @map("from_postal_prefix") // ej. "C14"
-  toPostalPrefix   String       @map("to_postal_prefix")
+  distanceKmMin    Int          @map("distance_km_min") // ej. 0
+  distanceKmMax    Int          @map("distance_km_max") // ej. 10
   weightGramsMin   Int          @map("weight_grams_min")
   weightGramsMax   Int          @map("weight_grams_max")
   costCents        Int          @map("cost_cents")
@@ -138,7 +142,7 @@ model ShippingRate {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([active, serviceLevel])
-  @@index([fromPostalPrefix, toPostalPrefix])
+  @@index([distanceKmMin, distanceKmMax])
   @@map("shipping_rates")
 }
 

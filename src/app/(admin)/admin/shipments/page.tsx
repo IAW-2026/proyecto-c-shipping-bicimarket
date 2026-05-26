@@ -1,7 +1,10 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
+import { Plus } from "lucide-react";
 import { ShipmentsTable } from "./ShipmentsTable";
 import { TableSkeleton } from "@/components/data-table/TableSkeleton";
+import { buttonVariants } from "@/components/ui/button";
 
 const DEFAULTS = {
   page: "1",
@@ -17,9 +20,6 @@ export default async function ShipmentsAdminPage({
 }) {
   const sp = await searchParams;
 
-  // Redirige a la URL con defaults si faltan params obligatorios.
-  // Evita que la primera entrada caiga en estado vacío y se generen race
-  // conditions con el cliente.
   const missing = Object.keys(DEFAULTS).some(
     (k) => typeof sp[k] !== "string",
   );
@@ -40,15 +40,25 @@ export default async function ShipmentsAdminPage({
   }
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h2 className="text-2xl font-semibold">Envíos</h2>
-        <p className="text-sm text-muted-foreground">
-          Todos los envíos del marketplace
-        </p>
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="font-heading text-2xl font-semibold tracking-tight">
+            Envíos
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Todos los envíos del marketplace
+          </p>
+        </div>
+        <Link
+          href="/admin/shipments/new"
+          className={buttonVariants({ size: "lg" })}
+        >
+          <Plus className="size-4" /> Nuevo envío
+        </Link>
       </div>
 
-      <Suspense fallback={<TableSkeleton rows={20} columns={5} />}>
+      <Suspense fallback={<TableSkeleton rows={20} columns={7} />}>
         <ShipmentsTable />
       </Suspense>
     </div>

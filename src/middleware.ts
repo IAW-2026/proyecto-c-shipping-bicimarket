@@ -11,10 +11,12 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 // - "/api/v1/*" mixto: la mayoría requieren JWT (auth() en el handler), algunos
 //   son S2S (requireServiceToken) y otros aceptan ambos. Cada handler decide.
 // - "/webhooks/mercadopago" SOLO si esta es la Payments App (no en Shipping)
+// - "/track/*" tracking público (cualquiera con el código puede ver el estado)
 const isPublicRoute = createRouteMatcher([
   "/",
   "/sign-in(.*)",
   "/sign-up(.*)",
+  "/track(.*)",
   "/api/health",
   "/api/internal(.*)",
   "/api/v1(.*)",

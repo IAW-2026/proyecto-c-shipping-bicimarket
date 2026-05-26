@@ -5,7 +5,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
-import { isAdmin } from "@/lib/auth-helpers";
+import { requireAdmin } from "@/lib/auth-helpers";
 import { generateId } from "@/lib/ids";
 import { ApiError, handleApiError } from "@/lib/api-error";
 import { createAssignmentSchema } from "@/validation/assignments";
@@ -23,7 +23,7 @@ export async function POST(
     const { shipmentId } = await params;
 
     const { userId, sessionClaims } = await auth();
-    if (!userId || !isAdmin(sessionClaims)) {
+    if (!userId || !(await requireAdmin(sessionClaims))) {
       throw new ApiError("FORBIDDEN", 403, "Admin requerido");
     }
 

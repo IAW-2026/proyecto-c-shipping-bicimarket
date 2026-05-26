@@ -44,3 +44,5 @@ next-env.d.ts
 
 #referencias de diseño
 /design
+# clerk configuration (can include secrets)
+/.clerk/

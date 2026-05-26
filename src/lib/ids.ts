@@ -4,6 +4,7 @@
 // la escritura y evita acoplar a CUID/UUID del lado DB.
 
 type IdPrefix =
+  // Prefijos propios (Shipping App es dueña de estos IDs)
   | "shp"  // shipment
   | "qte"  // shipping_quote
   | "pkg"  // package
@@ -12,7 +13,13 @@ type IdPrefix =
   | "prf"  // delivery_proof
   | "ssh"  // shipment_status_history
   | "lop"  // logistics_operator
-  | "rat"; // shipping_rate
+  | "rat"  // shipping_rate
+  // Prefijos opacos a otras apps (normalmente Shipping NO los crea, los recibe
+  // via S2S). Habilitados acá para el endpoint dev /api/v1/admin/shipments
+  // que crea envíos manualmente sin depender de Seller/Buyer App.
+  | "ord"  // order (Buyer)
+  | "osg"  // order_seller_group (Buyer)
+  | "sor"; // sales_order (Seller)
 
 /**
  * Genera un ID con prefijo de recurso + 24 chars hex (random).

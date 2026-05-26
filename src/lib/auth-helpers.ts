@@ -1,7 +1,8 @@
 import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
+import { generateId } from "@/lib/ids";
 import type { LogisticsOperator } from "@/generated/prisma/client";
-import { OperatorStatus } from "@/generated/prisma/enums";
+import { OperatorStatus, VehicleType } from "@/generated/prisma/enums";
 
 /**
  * Helper de auth para route handlers que requieren un operador logístico
@@ -60,21 +61,173 @@ export async function getActiveOperator(): Promise<LogisticsOperator | null> {
 }
 
 /**
- * Lee el flag admin del JWT de Clerk-Shipping.
+ * Lee el flag admin del JWT de Clerk-Shipping (sync, barato).
  * Convención: docs/05 §2 — los admins se marcan con
  * publicMetadata.admin = true desde Clerk Dashboard.
  *
- * Se usa con los sessionClaims que ya tenés de auth():
+ * Por default el JWT NO incluye publicMetadata. Hay 2 formas de tenerlo:
+ *   (a) Clerk Dashboard → Sessions → Customize session token →
+ *       { "publicMetadata": "{{user.public_metadata}}" }
+ *   (b) Usar `isAdminAsync()` de abajo, que pega a Clerk API.
  *
- *   const { sessionClaims } = await auth();
- *   if (!isAdmin(sessionClaims)) throw new ApiError("FORBIDDEN", 403, ...);
+ * Esta función intenta varios paths del JWT por compatibilidad:
+ *   - publicMetadata.admin (custom claim)
+ *   - public_metadata.admin (snake_case alternativo)
+ *   - metadata.admin
+ *   - admin (claim directo)
  */
 export function isAdmin(sessionClaims: unknown): boolean {
   if (!sessionClaims || typeof sessionClaims !== "object") return false;
 
   const claims = sessionClaims as Record<string, unknown>;
-  const publicMetadata = claims.publicMetadata;
 
-  if (!publicMetadata || typeof publicMetadata !== "object") return false;
-  return (publicMetadata as Record<string, unknown>).admin === true;
+  // Path 1: publicMetadata.admin
+  const pm = claims.publicMetadata;
+  if (pm && typeof pm === "object" && (pm as Record<string, unknown>).admin === true) {
+    return true;
+  }
+  // Path 2: public_metadata.admin (snake_case)
+  const sm = claims.public_metadata;
+  if (sm && typeof sm === "object" && (sm as Record<string, unknown>).admin === true) {
+    return true;
+  }
+  // Path 3: metadata.admin
+  const m = claims.metadata;
+  if (m && typeof m === "object" && (m as Record<string, unknown>).admin === true) {
+    return true;
+  }
+  // Path 4: admin directo en el JWT
+  if (claims.admin === true) return true;
+
+  return false;
+}
+
+/**
+ * Versión async — pega a la API de Clerk para leer publicMetadata.admin del
+ * user completo. Más caro (1 round-trip a Clerk) pero funciona sin custom
+ * session token configurado. Usar SOLO cuando isAdmin(sessionClaims) devuelve
+ * false como fallback, o en layouts donde la latencia no importa.
+ */
+export async function isAdminAsync(): Promise<boolean> {
+  // Import lazy para evitar costo en archivos que solo usan isAdmin sync.
+  const { currentUser } = await import("@clerk/nextjs/server");
+  const user = await currentUser();
+  if (!user) return false;
+  const pm = user.publicMetadata as Record<string, unknown> | null;
+  return pm?.admin === true;
+}
+
+/**
+ * Combina el check sync del JWT con el fallback async a Clerk API. Devuelve
+ * true si el user logueado es admin por cualquiera de las 2 vías. Pensada para
+ * route handlers admin:
+ *
+ *   const { userId, sessionClaims } = await auth();
+ *   if (!userId || !(await requireAdmin(sessionClaims))) {
+ *     throw new ApiError("FORBIDDEN", 403, "Admin requerido");
+ *   }
+ */
+export async function requireAdmin(sessionClaims: unknown): Promise<boolean> {
+  if (isAdmin(sessionClaims)) return true;
+  return isAdminAsync();
+}
+
+/**
+ * Igual que `getActiveOperator()` pero con autoprovisioning en dev:
+ * si el user logueado no está vinculado a ningún operador, crea uno
+ * automáticamente con datos de Clerk (email + nombre completo) y
+ * status=active. El comportamiento está controlado por el env var
+ * `AUTO_PROVISION_OPERATORS`:
+ *
+ *   - "true"  (dev/staging): autoprovision activado.
+ *   - cualquier otra cosa (prod): no provisiona, devuelve null
+ *     y el caller maneja el 403.
+ *
+ * Decisión de diseño:
+ * - En prod los operadores deben ser invitados por un admin (docs/05 §3.1).
+ *   Esa regla queda intacta — no hay autoprovision si la var no está en
+ *   "true".
+ * - En dev el flujo de invitación es tedioso: cada cuenta de Clerk nueva
+ *   tendría que ser vinculada manualmente. Para no fricar el día a día,
+ *   activamos el atajo.
+ *
+ * Reglas extra:
+ * - Los admins no se autoprovisionan como operadores (ellos van a /admin/*).
+ * - Los campos sensibles (vehicle/license_plate/documento) quedan con
+ *   placeholders editables desde /admin/operators/[id].
+ */
+export async function getOrProvisionOperator(): Promise<LogisticsOperator | null> {
+  const existing = await getActiveOperator();
+  if (existing) return existing;
+
+  if (process.env.AUTO_PROVISION_OPERATORS !== "true") return null;
+
+  const { userId, sessionClaims } = await auth();
+  if (!userId) return null;
+
+  // Admins no se autoprovisionan como operadores
+  if (isAdmin(sessionClaims) || (await isAdminAsync())) return null;
+
+  // Si existe un row pero con status != active, lo reactivamos (es el caso
+  // de un operador que se suspendió y volvió a entrar — en dev, asumimos
+  // que querés probar el flujo).
+  const inactive = await prisma.logisticsOperator.findUnique({
+    where: { clerkUserId: userId },
+  });
+  if (inactive) {
+    return prisma.logisticsOperator.update({
+      where: { id: inactive.id },
+      data: { status: OperatorStatus.active },
+    });
+  }
+
+  // Crear nuevo desde datos de Clerk
+  const { currentUser } = await import("@clerk/nextjs/server");
+  const user = await currentUser();
+  if (!user) return null;
+
+  const email = user.primaryEmailAddress?.emailAddress ?? `${userId}@dev.local`;
+  const fullName =
+    [user.firstName, user.lastName].filter(Boolean).join(" ").trim() ||
+    email.split("@")[0] ||
+    "Operador";
+
+  return prisma.logisticsOperator.create({
+    data: {
+      id: generateId("lop"),
+      clerkUserId: userId,
+      fullName,
+      email,
+      phone: "+54 11 0000-0000",
+      documentId: "00000000",
+      vehicleType: VehicleType.van,
+      licensePlate: "PENDIENTE",
+      status: OperatorStatus.active,
+    },
+  });
+}
+
+/**
+ * Decide a qué pantalla landing redirigir a un user recién logueado según su
+ * rol. Centralizado acá para que tanto `/` (landing pública) como `/dashboard`
+ * (target post-login de Clerk) usen la misma regla:
+ *
+ *   - Admin                          → /admin/shipments
+ *   - Operador activo (vinculado)    → /dashboard/assignments
+ *   - Si AUTO_PROVISION_OPERATORS    → autoprovision + /dashboard/assignments
+ *   - Ninguno de los dos             → /forbidden
+ *
+ * Si el user es admin Y también operador (caso típico en dev), gana admin.
+ * Los admins pueden ver el dashboard del operador navegando manualmente
+ * a /dashboard/assignments.
+ */
+export async function resolveLandingPath(
+  sessionClaims: unknown,
+): Promise<string> {
+  if (await requireAdmin(sessionClaims)) {
+    return "/admin/shipments";
+  }
+  const operator = await getOrProvisionOperator();
+  if (operator) return "/dashboard/assignments";
+  return "/forbidden";
 }
