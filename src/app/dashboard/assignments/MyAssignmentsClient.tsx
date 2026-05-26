@@ -7,10 +7,12 @@ import { EmptyState } from "@/components/feedback/EmptyState";
 import { ErrorBanner } from "@/components/feedback/ErrorBanner";
 import { ShipmentMobileCard } from "@/components/operator/ShipmentMobileCard";
 import { TransitionButton } from "@/components/operator/TransitionButton";
+import { OperatorStatusBanner } from "@/components/operator/OperatorStatusBanner";
 import { useMyAssignments } from "@/hooks/querys/assignments/useMyAssignments";
 import { cn } from "@/lib/utils";
 import type { AssignmentDTO } from "@/types/assignments";
 import type { ShipmentStatus } from "@/types/shipments";
+import type { OperatorStatus } from "@/types/logistics-operators";
 
 type Tab = "all" | "to_pickup" | "in_progress" | "out_for_delivery";
 
@@ -28,10 +30,17 @@ const TAB_STATUSES: Record<Tab, ShipmentStatus[] | null> = {
   out_for_delivery: ["out_for_delivery"],
 };
 
-export function MyAssignmentsClient({ firstName }: { firstName: string }) {
+export function MyAssignmentsClient({
+  firstName,
+  operatorStatus,
+}: {
+  firstName: string;
+  operatorStatus: OperatorStatus;
+}) {
   const [tab, setTab] = useState<Tab>("all");
   const { data, isLoading, isError, refetch, isRefetching } =
     useMyAssignments();
+  const actionsBlocked = operatorStatus !== "active";
 
   const all = data?.data ?? [];
 
@@ -89,6 +98,9 @@ export function MyAssignmentsClient({ firstName }: { firstName: string }) {
         </Button>
       </header>
 
+      {/* Banner si la cuenta del operador está suspended/inactive */}
+      <OperatorStatusBanner status={operatorStatus} />
+
       {isError && (
         <ErrorBanner
           title="Error cargando tus envíos"
@@ -143,7 +155,7 @@ export function MyAssignmentsClient({ firstName }: { firstName: string }) {
         <ul className="space-y-3">
           {filtered.map((a) => (
             <li key={a.id}>
-              <AssignmentItem assignment={a} />
+              <AssignmentItem assignment={a} disabled={actionsBlocked} />
             </li>
           ))}
         </ul>
@@ -158,7 +170,13 @@ export function MyAssignmentsClient({ firstName }: { firstName: string }) {
   );
 }
 
-function AssignmentItem({ assignment }: { assignment: AssignmentDTO }) {
+function AssignmentItem({
+  assignment,
+  disabled,
+}: {
+  assignment: AssignmentDTO;
+  disabled: boolean;
+}) {
   return (
     <ShipmentMobileCard
       assignment={assignment}
@@ -170,6 +188,7 @@ function AssignmentItem({ assignment }: { assignment: AssignmentDTO }) {
           status={assignment.status}
           size="lg"
           fullWidth
+          disabled={disabled}
           className="h-11"
         />
       }

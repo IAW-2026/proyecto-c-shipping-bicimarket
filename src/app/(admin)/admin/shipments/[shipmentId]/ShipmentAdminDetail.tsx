@@ -28,8 +28,10 @@ import { VehicleIcon } from "@/components/operator/VehicleIcon";
 import { useShipment } from "@/hooks/querys/shipments/useShipment";
 import { useTrackingEvents } from "@/hooks/querys/shipments/useTrackingEvents";
 import { useShipmentStatusHistory } from "@/hooks/querys/shipments/useShipmentStatusHistory";
+import { useShipmentAssignments } from "@/hooks/querys/assignments/useShipmentAssignments";
 import { useRetryShipment } from "@/hooks/querys/shipments/useRetryShipment";
 import { distanceBetweenPostalCodes } from "@/lib/geo/distance";
+import { VEHICLE_LABELS } from "@/lib/status-styles";
 import {
   formatArs,
   formatDateShort,
@@ -50,7 +52,16 @@ export function ShipmentAdminDetail({ shipmentId }: ShipmentAdminDetailProps) {
   const { data: shipment, isLoading, isError, refetch } = useShipment(shipmentId);
   const { data: tracking } = useTrackingEvents(shipmentId);
   const { data: history } = useShipmentStatusHistory(shipmentId);
+  const { data: assignmentsResp } = useShipmentAssignments(shipmentId);
   const retry = useRetryShipment();
+
+  // Assignment activo (status in [assigned, accepted, picked_up]) — el detalle
+  // muestra ese (no los históricos). Pueden existir varios de operadores
+  // pasados con status `reassigned/cancelled/delivered` pero nos interesa el
+  // que todavía está en juego.
+  const currentAssignment = assignmentsResp?.data.find((a) =>
+    ["assigned", "accepted", "picked_up"].includes(a.status),
+  ) ?? null;
 
   function handleRetry() {
     retry.mutate(shipmentId, {
@@ -84,9 +95,6 @@ export function ShipmentAdminDetail({ shipmentId }: ShipmentAdminDetailProps) {
     navigator.clipboard.writeText(text);
     toast.success(`${what}: ${text}`);
   }
-
-  // Mock de asignación actual — sprint 2 vendría de useShipmentAssignments(id)
-  const currentAssignment = getCurrentAssignmentStub();
 
   return (
     <div className="space-y-6">
@@ -295,22 +303,32 @@ export function ShipmentAdminDetail({ shipmentId }: ShipmentAdminDetailProps) {
             </h2>
             {currentAssignment ? (
               <div className="space-y-3">
-                <div className="flex items-center gap-3">
+                <div className="flex items-start gap-3">
                   <OperatorAvatar
-                    name={currentAssignment.operatorName}
-                    status="active"
+                    name={currentAssignment.operator.full_name}
+                    status={currentAssignment.operator.status}
                     size="md"
                   />
-                  <div className="space-y-0.5">
-                    <p className="text-sm font-medium">
-                      {currentAssignment.operatorName}
-                    </p>
+                  <div className="flex-1 space-y-0.5">
+                    <Link
+                      href={`/admin/operators/${currentAssignment.operator.id}`}
+                      className="text-sm font-medium hover:text-primary"
+                    >
+                      {currentAssignment.operator.full_name}
+                    </Link>
                     <p className="text-xs text-muted-foreground">
                       <VehicleIcon
-                        vehicle={currentAssignment.operatorVehicle as never}
+                        vehicle={currentAssignment.operator.vehicle_type}
                         className="mr-1"
                       />
-                      {currentAssignment.operatorPlate}
+                      {VEHICLE_LABELS[currentAssignment.operator.vehicle_type]}{" "}
+                      ·{" "}
+                      <span className="font-mono">
+                        {currentAssignment.operator.license_plate}
+                      </span>
+                    </p>
+                    <p className="font-mono text-[11px] text-muted-foreground">
+                      {currentAssignment.operator.id}
                     </p>
                   </div>
                 </div>
@@ -322,9 +340,15 @@ export function ShipmentAdminDetail({ shipmentId }: ShipmentAdminDetailProps) {
                   >
                     Reasignar operador
                   </Button>
-                  <Button variant="ghost" size="sm" disabled>
+                  <a
+                    href={`mailto:${currentAssignment.operator.email}`}
+                    className={buttonVariants({
+                      variant: "ghost",
+                      size: "sm",
+                    })}
+                  >
                     <Mail className="size-3.5" /> Contactar
-                  </Button>
+                  </a>
                 </div>
               </div>
             ) : (
@@ -397,8 +421,8 @@ export function ShipmentAdminDetail({ shipmentId }: ShipmentAdminDetailProps) {
         currentAssignment={
           currentAssignment
             ? {
-                assignmentId: currentAssignment.assignmentId,
-                operatorName: currentAssignment.operatorName,
+                assignmentId: currentAssignment.id,
+                operatorName: currentAssignment.operator.full_name,
               }
             : undefined
         }
@@ -454,21 +478,3 @@ function StaticField({ label, value }: { label: string; value: string }) {
   );
 }
 
-interface CurrentAssignmentStub {
-  operatorName: string;
-  operatorClerkId: string;
-  operatorVehicle: string;
-  operatorPlate: string;
-  operatorOpId: string;
-  assignmentId: string;
-}
-
-/**
- * Stub temporal hasta que se implemente `useShipmentAssignments(id)`. Devuelve
- * el assignment activo del shipment o null. Aislado en una función para que
- * TS no haga narrow a `null` en el caller. (No tiene prefijo `use*` porque
- * no es un hook — no usa estado de React.)
- */
-function getCurrentAssignmentStub(): CurrentAssignmentStub | null {
-  return null;
-}

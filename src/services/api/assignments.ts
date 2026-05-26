@@ -4,7 +4,17 @@ import type {
   AssignmentDTO,
   CreateAssignmentBody,
   PatchAssignmentBody,
+  ShipmentAssignmentDTO,
 } from "@/types/assignments";
+
+export async function listShipmentAssignments(
+  shipmentId: string,
+): Promise<{ data: ShipmentAssignmentDTO[] }> {
+  const res = await api.get<{ data: ShipmentAssignmentDTO[] }>(
+    `/v1/shipments/${shipmentId}/assignments`,
+  );
+  return res.data;
+}
 
 export async function getMyAssignments(
   page = 1,

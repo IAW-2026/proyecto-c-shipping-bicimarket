@@ -1,6 +1,8 @@
-// POST /api/v1/shipments/{shipmentId}/assignments — SH5 (JWT admin, docs/03)
-// Crea un delivery_assignment. Si shipment está en `created`, lo mueve a
-// `ready_for_pickup` (transición válida automática).
+// GET  /api/v1/shipments/{shipmentId}/assignments — lista assignments + operador
+// POST /api/v1/shipments/{shipmentId}/assignments — SH5 create (JWT admin, docs/03)
+//
+// El GET joina con LogisticsOperator para que el detalle admin pueda mostrar
+// quién tiene el shipment ahora mismo (filtrando por status activo).
 
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
@@ -14,6 +16,56 @@ import {
   StatusHistorySource,
   OperatorStatus,
 } from "@/generated/prisma/enums";
+import type {
+  AssignmentStatus as TAssignmentStatus,
+} from "@/types/assignments";
+import type {
+  OperatorStatus as TOperatorStatus,
+  VehicleType as TVehicleType,
+} from "@/types/logistics-operators";
+import type { ShipmentAssignmentDTO } from "@/types/assignments";
+
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ shipmentId: string }> },
+) {
+  try {
+    const { shipmentId } = await params;
+
+    const { userId, sessionClaims } = await auth();
+    if (!userId || !(await requireAdmin(sessionClaims))) {
+      throw new ApiError("FORBIDDEN", 403, "Admin requerido");
+    }
+
+    const rows = await prisma.deliveryAssignment.findMany({
+      where: { shipmentId },
+      orderBy: { assignedAt: "desc" },
+      include: { operator: true },
+    });
+
+    const data: ShipmentAssignmentDTO[] = rows.map((r) => ({
+      id: r.id,
+      shipment_id: r.shipmentId,
+      status: r.status as TAssignmentStatus,
+      assigned_at: r.assignedAt.toISOString(),
+      completed_at: r.completedAt?.toISOString() ?? null,
+      operator: {
+        id: r.operator.id,
+        clerk_user_id: r.operator.clerkUserId,
+        full_name: r.operator.fullName,
+        email: r.operator.email,
+        phone: r.operator.phone,
+        vehicle_type: r.operator.vehicleType as TVehicleType,
+        license_plate: r.operator.licensePlate,
+        status: r.operator.status as TOperatorStatus,
+      },
+    }));
+
+    return NextResponse.json({ data });
+  } catch (err) {
+    return handleApiError(err);
+  }
+}
 
 export async function POST(
   req: NextRequest,

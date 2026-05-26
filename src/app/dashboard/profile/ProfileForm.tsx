@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorBanner } from "@/components/feedback/ErrorBanner";
 import { VehicleIcon } from "@/components/operator/VehicleIcon";
+import { OperatorStatusBanner } from "@/components/operator/OperatorStatusBanner";
 import { useMyOperator } from "@/hooks/querys/my-operator/useMyOperator";
 import { useMyOperatorMutations } from "@/hooks/querys/my-operator/useMyOperatorMutations";
 import { VEHICLE_LABELS } from "@/lib/status-styles";
@@ -108,6 +109,8 @@ export function ProfileForm() {
           administra Clerk.
         </p>
       </div>
+
+      <OperatorStatusBanner status={operator.status} />
 
       {/* Bloque de Clerk (identidad) — nombre/email read-only + UserButton
           para gestionar la cuenta de Clerk (cambiar foto, password, logout). */}
@@ -210,7 +213,9 @@ export function ProfileForm() {
         <div className="flex items-center justify-end gap-2 pt-2">
           <Button
             type="submit"
-            disabled={patchMyOperator.isPending}
+            disabled={
+              operator.status !== "active" || patchMyOperator.isPending
+            }
             className="h-11 w-full"
           >
             {patchMyOperator.isPending ? "Guardando…" : "Guardar cambios"}

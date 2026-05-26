@@ -6,7 +6,9 @@ export function useOperatorsKpis() {
   return useQuery({
     queryKey: ["logistics-operators", "kpis"],
     queryFn: getOperatorsKpis,
-    staleTime: 60 * 1000,
+    // Mismos 30s que la tabla — KPIs y filas se mantienen en sync.
+    staleTime: 30 * 1000,
+    refetchInterval: 30 * 1000,
     refetchOnWindowFocus: true,
   });
 }

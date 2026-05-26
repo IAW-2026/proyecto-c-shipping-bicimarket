@@ -18,6 +18,11 @@ export function useTracking(code?: string) {
       }
       return failureCount < 1;
     },
+    // Tracking público — la data se queda fresca 30s y después se refetchea
+    // automáticamente. Si el operador acaba de avanzar el estado, el
+    // comprador lo ve sin tener que recargar la página.
     staleTime: 30 * 1000,
+    refetchInterval: 30 * 1000,
+    refetchOnWindowFocus: true,
   });
 }

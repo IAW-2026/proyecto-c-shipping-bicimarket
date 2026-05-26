@@ -115,26 +115,7 @@ export function OperatorDetail({ operatorId }: { operatorId: string }) {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {isSuspended || isInactive ? (
-            <Button
-              size="sm"
-              onClick={reactivate}
-              disabled={patchOperator.isPending}
-            >
-              Reactivar
-            </Button>
-          ) : (
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => setConfirmSuspend(true)}
-              disabled={patchOperator.isPending}
-            >
-              Suspender
-            </Button>
-          )}
-        </div>
+
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
@@ -288,34 +269,29 @@ export function OperatorDetail({ operatorId }: { operatorId: string }) {
             <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               Acciones
             </h2>
-            <div className="flex flex-col gap-1">
-              <Button variant="ghost" size="sm" disabled className="justify-start">
-                Editar datos
-              </Button>
-              <Button variant="ghost" size="sm" disabled className="justify-start">
-                <LogOut className="size-3.5" /> Forzar logout
-              </Button>
-              {!isSuspended && (
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => setConfirmSuspend(true)}
-                  className="justify-start"
-                >
-                  Suspender operador
-                </Button>
-              )}
-            </div>
+                   <div className="flex flex-wrap items-center gap-2">
+          {isSuspended || isInactive ? (
+            <Button
+              size="sm"
+              onClick={reactivate}
+              disabled={patchOperator.isPending}
+            >
+              Reactivar
+            </Button>
+          ) : (
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setConfirmSuspend(true)}
+              disabled={patchOperator.isPending}
+            >
+              Suspender
+            </Button>
+          )}
+        </div>
           </section>
 
-          {/* Nota */}
-          <section className="rounded-xl border border-border bg-muted/40 p-4 text-xs text-muted-foreground">
-            <strong className="block text-foreground">
-              Suspender vs. inactivar
-            </strong>
-            Al suspender bloqueás el acceso pero conservás el historial.
-            Inactivar es para bajas definitivas.
-          </section>
+        
         </div>
       </div>
 

@@ -17,6 +17,8 @@ interface TransitionButtonProps {
   size?: "default" | "lg";
   /** Si true, el botón se renderiza full-width (default para sticky/cards). */
   fullWidth?: boolean;
+  /** Si true, deshabilita el botón (ej. operador suspended). */
+  disabled?: boolean;
   className?: string;
 }
 
@@ -33,6 +35,7 @@ export function TransitionButton({
   status,
   size = "default",
   fullWidth = true,
+  disabled = false,
   className,
 }: TransitionButtonProps) {
   const [pickupOpen, setPickupOpen] = useState(false);
@@ -82,7 +85,7 @@ export function TransitionButton({
       <Button
         size={size}
         onClick={handleClick}
-        disabled={addTrackingEvent.isPending}
+        disabled={disabled || addTrackingEvent.isPending}
         className={`${fullWidth ? "w-full" : ""} ${className ?? ""}`}
       >
         <Icon className="size-4" />

@@ -11,6 +11,7 @@ import { TrackingTimeline } from "@/components/shipping/TrackingTimeline";
 import { ShipmentRouteMap } from "@/components/shipping/ShipmentRouteMap";
 import { DeliveryProofCard } from "@/components/shipping/DeliveryProofCard";
 import { TransitionButton } from "@/components/operator/TransitionButton";
+import { OperatorStatusBanner } from "@/components/operator/OperatorStatusBanner";
 import { useShipment } from "@/hooks/querys/shipments/useShipment";
 import { useShipmentMutations } from "@/hooks/querys/shipments/useShipmentMutations";
 import { useTrackingEvents } from "@/hooks/querys/shipments/useTrackingEvents";
@@ -18,9 +19,11 @@ import { useRetryShipment } from "@/hooks/querys/shipments/useRetryShipment";
 import { distanceBetweenPostalCodes } from "@/lib/geo/distance";
 import { formatWeightKg } from "@/lib/format";
 import { SERVICE_LEVEL_STYLES } from "@/lib/status-styles";
+import type { OperatorStatus } from "@/types/logistics-operators";
 
 interface OperatorShipmentDetailProps {
   shipmentId: string;
+  operatorStatus: OperatorStatus;
 }
 
 /**
@@ -34,11 +37,13 @@ interface OperatorShipmentDetailProps {
  */
 export function OperatorShipmentDetail({
   shipmentId,
+  operatorStatus,
 }: OperatorShipmentDetailProps) {
   const router = useRouter();
   const { data: shipment, isLoading, isError, refetch } = useShipment(shipmentId);
   const { data: trackingEvents } = useTrackingEvents(shipmentId);
   const retry = useRetryShipment();
+  const actionsBlocked = operatorStatus !== "active";
 
   function handleRetry() {
     retry.mutate(shipmentId, {
@@ -97,6 +102,9 @@ export function OperatorShipmentDetail({
         <StatusBadge status={shipment.status} size="sm" />
       </header>
 
+      {/* Banner si el operador está suspended/inactive */}
+      <OperatorStatusBanner status={operatorStatus} />
+
       {/* Línea secundaria */}
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <span>
@@ -139,7 +147,7 @@ export function OperatorShipmentDetail({
               size="sm"
               variant="outline"
               onClick={handleRetry}
-              disabled={retry.isPending}
+              disabled={actionsBlocked || retry.isPending}
               className="border-destructive/40 text-destructive hover:bg-destructive/15"
             >
               <RefreshCcw className="size-3.5" />
@@ -206,11 +214,13 @@ export function OperatorShipmentDetail({
           status={shipment.status}
           size="lg"
           fullWidth
+          disabled={actionsBlocked}
           className="h-12 text-base"
         />
         <FailureToggleButton
           shipmentId={shipment.id}
           status={shipment.status}
+          disabled={actionsBlocked}
         />
       </div>
     </div>
@@ -228,9 +238,11 @@ export function OperatorShipmentDetail({
 function FailureToggleButton({
   shipmentId,
   status,
+  disabled = false,
 }: {
   shipmentId: string;
   status: import("@/types/shipments").ShipmentStatus;
+  disabled?: boolean;
 }) {
   const { addTrackingEvent } = useShipmentMutations(shipmentId);
   const canFail = status === "in_transit" || status === "out_for_delivery";
@@ -248,7 +260,7 @@ function FailureToggleButton({
       variant="ghost"
       size="sm"
       onClick={handle}
-      disabled={addTrackingEvent.isPending}
+      disabled={disabled || addTrackingEvent.isPending}
       className="w-full text-destructive hover:bg-destructive/10"
     >
       Marcar entrega fallida

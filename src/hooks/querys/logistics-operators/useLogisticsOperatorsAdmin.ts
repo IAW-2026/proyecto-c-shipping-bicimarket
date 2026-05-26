@@ -21,7 +21,12 @@ export function useLogisticsOperatorsAdmin(
       sortDir,
     ],
     queryFn: () => listOperatorsAdmin(filters, page, perPage, sortBy, sortDir),
+    // Auto-refresh: la data queda "fresca" 30s y después se refetchea
+    // automáticamente. Útil para que el admin vea cambios en tiempo real
+    // sin tener que recargar la página.
     staleTime: 30 * 1000,
+    refetchInterval: 30 * 1000,
+    refetchOnWindowFocus: true,
     placeholderData: (prev) => prev,
   });
 }

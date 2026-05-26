@@ -10,7 +10,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getActiveOperator } from "@/lib/auth-helpers";
+import { getOperatorRecord } from "@/lib/auth-helpers";
 import { ApiError, handleApiError } from "@/lib/api-error";
 import { toAssignmentDTO } from "@/lib/dto";
 import {
@@ -36,9 +36,12 @@ type ShipmentWithPackages = Shipment & { packages: Package[] };
 
 export async function GET(_req: NextRequest) {
   try {
-    const operator = await getActiveOperator();
+    // Lectura permitida también para operadores suspended/inactive — la UI
+    // los deja navegar/ver sus envíos pero deshabilita los botones de acción.
+    // Las mutations (tracking-events, deliver…) siguen filtrando por active.
+    const operator = await getOperatorRecord();
     if (!operator) {
-      throw new ApiError("FORBIDDEN", 403, "Operador activo requerido");
+      throw new ApiError("FORBIDDEN", 403, "Operador requerido");
     }
 
     // Combinamos los dos sets en una sola query con OR.

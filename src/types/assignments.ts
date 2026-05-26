@@ -49,3 +49,27 @@ export interface PatchAssignmentBody {
   status?: AssignmentStatus;
   operator_clerk_user_id?: string;
 }
+
+/**
+ * Devuelto por GET /api/v1/shipments/{id}/assignments — lista de assignments
+ * del shipment con la info del operador joineada. Usado por el detalle admin
+ * para mostrar "quién tiene el envío" y abrir el dialog de reasignación con
+ * el contexto correcto.
+ */
+export interface ShipmentAssignmentDTO {
+  id: string;
+  shipment_id: string;
+  status: AssignmentStatus;
+  assigned_at: string;
+  completed_at: string | null;
+  operator: {
+    id: string;
+    clerk_user_id: string;
+    full_name: string;
+    email: string;
+    phone: string;
+    vehicle_type: import("./logistics-operators").VehicleType;
+    license_plate: string;
+    status: import("./logistics-operators").OperatorStatus;
+  };
+}

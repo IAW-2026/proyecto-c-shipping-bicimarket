@@ -155,6 +155,10 @@ export async function requireAdmin(sessionClaims: unknown): Promise<boolean> {
  * - Los admins no se autoprovisionan como operadores (ellos van a /admin/*).
  * - Los campos sensibles (vehicle/license_plate/documento) quedan con
  *   placeholders editables desde /admin/operators/[id].
+ * - Si el operador YA EXISTE pero está `suspended` o `inactive`, NO se
+ *   reactiva automáticamente — el operador queda bloqueado hasta que un
+ *   admin lo reactive desde /admin/operators/[id]. Eso preserva la
+ *   intención del admin al suspender.
  */
 export async function getOrProvisionOperator(): Promise<LogisticsOperator | null> {
   const existing = await getActiveOperator();
@@ -168,20 +172,72 @@ export async function getOrProvisionOperator(): Promise<LogisticsOperator | null
   // Admins no se autoprovisionan como operadores
   if (isAdmin(sessionClaims) || (await isAdminAsync())) return null;
 
-  // Si existe un row pero con status != active, lo reactivamos (es el caso
-  // de un operador que se suspendió y volvió a entrar — en dev, asumimos
-  // que querés probar el flujo).
-  const inactive = await prisma.logisticsOperator.findUnique({
+  // Si YA EXISTE un row para este clerk_user_id (sea cual sea su status),
+  // NO lo tocamos ni lo devolvemos. Si está suspended/inactive, los page
+  // server components que llamen acá redirigirán a /forbidden — pero hoy
+  // la UX cambió: las páginas del dashboard usan `getOperatorRecord()`
+  // para permitir navegación read-only del operador suspendido (los botones
+  // se deshabilitan en cliente).
+  const existingRow = await prisma.logisticsOperator.findUnique({
     where: { clerkUserId: userId },
   });
-  if (inactive) {
-    return prisma.logisticsOperator.update({
-      where: { id: inactive.id },
-      data: { status: OperatorStatus.active },
+  if (existingRow) return null;
+
+  // Crear nuevo desde datos de Clerk (solo si no había ningún row previo)
+  const { currentUser } = await import("@clerk/nextjs/server");
+  const user = await currentUser();
+  if (!user) return null;
+
+  const email = user.primaryEmailAddress?.emailAddress ?? `${userId}@dev.local`;
+  const fullName =
+    [user.firstName, user.lastName].filter(Boolean).join(" ").trim() ||
+    email.split("@")[0] ||
+    "Operador";
+
+  return prisma.logisticsOperator.create({
+    data: {
+      id: generateId("lop"),
+      clerkUserId: userId,
+      fullName,
+      email,
+      phone: "+54 11 0000-0000",
+      documentId: "00000000",
+      vehicleType: VehicleType.van,
+      licensePlate: "PENDIENTE",
+      status: OperatorStatus.active,
+    },
+  });
+}
+
+/**
+ * Devuelve el LogisticsOperator del user logueado SIN filtrar por status.
+ * Si no existe y `AUTO_PROVISION_OPERATORS=true`, lo crea (igual que
+ * `getOrProvisionOperator`). La diferencia clave: si existe pero está
+ * `suspended` o `inactive`, igualmente lo devuelve — el caller decide qué
+ * hacer (típicamente: dejar navegar pero deshabilitar acciones).
+ *
+ * Para mutations server-side seguir usando `getActiveOperator()` que filtra
+ * estrictamente por `active` y tira 403 si no.
+ */
+export async function getOperatorRecord(): Promise<LogisticsOperator | null> {
+  const { userId, sessionClaims } = await auth();
+  if (!userId) return null;
+
+  // Admins no se autoprovisionan
+  if (isAdmin(sessionClaims) || (await isAdminAsync())) {
+    // Pero si ya tienen un row de operador (caso dev típico), lo devolvemos
+    return prisma.logisticsOperator.findUnique({
+      where: { clerkUserId: userId },
     });
   }
 
-  // Crear nuevo desde datos de Clerk
+  const existing = await prisma.logisticsOperator.findUnique({
+    where: { clerkUserId: userId },
+  });
+  if (existing) return existing;
+
+  if (process.env.AUTO_PROVISION_OPERATORS !== "true") return null;
+
   const { currentUser } = await import("@clerk/nextjs/server");
   const user = await currentUser();
   if (!user) return null;

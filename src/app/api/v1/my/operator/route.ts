@@ -10,7 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { getActiveOperator } from "@/lib/auth-helpers";
+import { getActiveOperator, getOperatorRecord } from "@/lib/auth-helpers";
 import { ApiError, handleApiError } from "@/lib/api-error";
 import { toLogisticsOperatorDTO } from "@/lib/dto";
 
@@ -32,9 +32,12 @@ const updateMyOperatorSchema = z.object({
 
 export async function GET(_req: NextRequest) {
   try {
-    const operator = await getActiveOperator();
+    // Lectura permitida aunque esté suspended/inactive (el frontend lo usa
+    // para mostrar el banner "tu cuenta está suspendida" + deshabilitar
+    // botones). El PATCH de abajo sigue requiriendo active.
+    const operator = await getOperatorRecord();
     if (!operator) {
-      throw new ApiError("FORBIDDEN", 403, "Operador activo requerido");
+      throw new ApiError("FORBIDDEN", 403, "Operador requerido");
     }
     return NextResponse.json(toLogisticsOperatorDTO(operator));
   } catch (err) {
