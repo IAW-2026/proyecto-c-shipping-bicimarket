@@ -3,6 +3,7 @@ import type { PaginatedResponse } from "@/types/common";
 import type {
   AssignmentDTO,
   CreateAssignmentBody,
+  MyDeliveryDTO,
   PatchAssignmentBody,
   ShipmentAssignmentDTO,
 } from "@/types/assignments";
@@ -22,6 +23,16 @@ export async function getMyAssignments(
 ): Promise<PaginatedResponse<AssignmentDTO>> {
   const res = await api.get<PaginatedResponse<AssignmentDTO>>(
     `/v1/my/assignments?page=${page}&limit=${limit}`,
+  );
+  return res.data;
+}
+
+export async function getMyDeliveries(
+  page = 1,
+  limit = 20,
+): Promise<PaginatedResponse<MyDeliveryDTO>> {
+  const res = await api.get<PaginatedResponse<MyDeliveryDTO>>(
+    `/v1/my/deliveries?page=${page}&limit=${limit}`,
   );
   return res.data;
 }

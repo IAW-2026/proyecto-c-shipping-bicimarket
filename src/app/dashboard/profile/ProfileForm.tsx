@@ -1,8 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { UserButton } from "@clerk/nextjs";
-import { ChevronLeft, Lock } from "lucide-react";
+import { SignOutButton, UserButton } from "@clerk/nextjs";
+import { ChevronLeft, LogOut, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -222,6 +222,17 @@ export function ProfileForm() {
           </Button>
         </div>
       </form>
+
+      <SignOutButton redirectUrl="/sign-in">
+        <Button
+          type="button"
+          variant="ghost"
+          className="h-11 w-full justify-center gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
+        >
+          <LogOut className="size-4" />
+          Cerrar sesión
+        </Button>
+      </SignOutButton>
     </div>
   );
 }

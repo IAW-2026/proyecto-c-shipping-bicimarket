@@ -51,6 +51,24 @@ export interface PatchAssignmentBody {
 }
 
 /**
+ * Item del historial de entregas finalizadas del operador logueado.
+ * Devuelto por GET /api/v1/my/deliveries — usado en /dashboard/profile para
+ * que el operador vea qué envíos completó cuando ya no aparecen en el listado
+ * activo (que filtra por estados in-progress).
+ */
+export interface MyDeliveryDTO {
+  id: string; // dla_… del assignment
+  shipment_id: string; // shp_…
+  tracking_number: string;
+  delivered_at: string; // ISO — assignment.completedAt
+  shipping_address: Address;
+  weight_grams_total: number;
+  packages_count: number;
+  carrier: string;
+  service_level: import("./shipments").ServiceLevel;
+}
+
+/**
  * Devuelto por GET /api/v1/shipments/{id}/assignments — lista de assignments
  * del shipment con la info del operador joineada. Usado por el detalle admin
  * para mostrar "quién tiene el envío" y abrir el dialog de reasignación con
