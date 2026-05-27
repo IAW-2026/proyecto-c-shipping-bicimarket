@@ -10,7 +10,7 @@ import { ApiError, handleApiError } from "@/lib/api-error";
 import { generateId } from "@/lib/ids";
 import { toShipmentDTO } from "@/lib/dto";
 import { patchShipmentStatusSchema } from "@/validation/shipments";
-import { StatusHistorySource } from "@/generated/prisma/enums";
+import { StatusHistorySource } from "@/generated/prisma/client";
 import { logger } from "@/lib/logger";
 
 export async function GET(

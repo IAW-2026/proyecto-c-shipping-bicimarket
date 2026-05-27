@@ -6,7 +6,7 @@ import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth-helpers";
 import { ApiError, handleApiError } from "@/lib/api-error";
-import { ShipmentStatus } from "@/generated/prisma/enums";
+import { ShipmentStatus } from "@/generated/prisma/client";
 import type { ShipmentsKpisDTO } from "@/types/admin-kpis";
 
 const ACTIVE_STATUSES = [

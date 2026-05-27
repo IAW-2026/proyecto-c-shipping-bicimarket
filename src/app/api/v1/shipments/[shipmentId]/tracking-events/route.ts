@@ -32,7 +32,7 @@ import {
   ShipmentStatus,
   StatusHistorySource,
   TrackingEventType,
-} from "@/generated/prisma/enums";
+} from "@/generated/prisma/client";
 import { logger } from "@/lib/logger";
 
 const ACTIVE_ASSIGNMENT_STATUSES = [

@@ -1,4 +1,4 @@
-import { ShipmentStatus, TrackingEventType } from "@/generated/prisma/enums";
+import { ShipmentStatus, TrackingEventType } from "@/generated/prisma/client";
 import { ApiError } from "@/lib/api-error";
 
 /**

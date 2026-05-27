@@ -15,7 +15,7 @@ import {
   ShipmentStatus,
   StatusHistorySource,
   OperatorStatus,
-} from "@/generated/prisma/enums";
+} from "@/generated/prisma/client";
 import type {
   AssignmentStatus as TAssignmentStatus,
 } from "@/types/assignments";

@@ -10,7 +10,7 @@ import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth-helpers";
 import { ApiError, handleApiError } from "@/lib/api-error";
 import { patchAssignmentSchema } from "@/validation/assignments";
-import { OperatorStatus } from "@/generated/prisma/enums";
+import { OperatorStatus } from "@/generated/prisma/client";
 
 export async function PATCH(
   req: NextRequest,

@@ -1,4 +1,4 @@
-import type { TrackingEventType as PrismaTrackingEventType } from "@/generated/prisma/enums";
+import type { TrackingEventType as PrismaTrackingEventType } from "@/generated/prisma/client";
 
 export type TrackingEventType =
   | "created"

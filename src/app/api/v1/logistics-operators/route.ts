@@ -21,7 +21,7 @@ import {
   AssignmentStatus,
   OperatorStatus,
   VehicleType,
-} from "@/generated/prisma/enums";
+} from "@/generated/prisma/client";
 import type { Prisma } from "@/generated/prisma/client";
 import type { LogisticsOperatorAdminDTO } from "@/types/operator-performance";
 

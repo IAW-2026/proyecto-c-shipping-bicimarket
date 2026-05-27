@@ -7,7 +7,7 @@ import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth-helpers";
 import { ApiError, handleApiError } from "@/lib/api-error";
-import { AssignmentStatus, ShipmentStatus } from "@/generated/prisma/enums";
+import { AssignmentStatus, ShipmentStatus } from "@/generated/prisma/client";
 import type { OperatorActiveAssignmentDTO } from "@/types/operator-performance";
 import type { Address } from "@/types/common";
 import type { ShipmentStatus as TShipmentStatus } from "@/types/shipments";

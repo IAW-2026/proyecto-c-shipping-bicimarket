@@ -6,7 +6,7 @@ import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth-helpers";
 import { ApiError, handleApiError } from "@/lib/api-error";
-import { AssignmentStatus } from "@/generated/prisma/enums";
+import { AssignmentStatus } from "@/generated/prisma/client";
 import type { OperatorPerformanceDTO } from "@/types/operator-performance";
 
 export async function GET(

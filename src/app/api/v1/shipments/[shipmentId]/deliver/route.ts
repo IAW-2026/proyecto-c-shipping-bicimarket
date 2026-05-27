@@ -13,7 +13,7 @@ import {
   TrackingEventType,
   AssignmentStatus,
   StatusHistorySource,
-} from "@/generated/prisma/enums";
+} from "@/generated/prisma/client";
 import { assertTransition } from "@/lib/transitions";
 import { logger } from "@/lib/logger";
 import type { DeliverShipmentResponse } from "@/types/tracking-events";

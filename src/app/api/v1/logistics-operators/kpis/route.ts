@@ -6,7 +6,7 @@ import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth-helpers";
 import { ApiError, handleApiError } from "@/lib/api-error";
-import { AssignmentStatus, OperatorStatus } from "@/generated/prisma/enums";
+import { AssignmentStatus, OperatorStatus } from "@/generated/prisma/client";
 import type { OperatorsKpisDTO } from "@/types/admin-kpis";
 
 const ACTIVE_ASSIGNMENT_STATUSES = [

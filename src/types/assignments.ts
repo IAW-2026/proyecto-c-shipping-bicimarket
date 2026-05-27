@@ -1,4 +1,4 @@
-import type { AssignmentStatus as PrismaAssignmentStatus } from "@/generated/prisma/enums";
+import type { AssignmentStatus as PrismaAssignmentStatus } from "@/generated/prisma/client";
 import type { Address } from "./common";
 import type { ShipmentStatus } from "./shipments";
 

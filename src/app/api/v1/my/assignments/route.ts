@@ -16,7 +16,7 @@ import { toAssignmentDTO } from "@/lib/dto";
 import {
   ShipmentStatus,
   AssignmentStatus,
-} from "@/generated/prisma/enums";
+} from "@/generated/prisma/client";
 import type { Shipment, Package } from "@/generated/prisma/client";
 
 const ACTIVE_SHIPMENT_STATUSES = [

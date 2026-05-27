@@ -1,4 +1,4 @@
-import type { StatusHistorySource as PrismaSource } from "@/generated/prisma/enums";
+import type { StatusHistorySource as PrismaSource } from "@/generated/prisma/client";
 import type { ShipmentStatus } from "./shipments";
 
 export type StatusHistorySource = "logistics" | "admin" | "system";

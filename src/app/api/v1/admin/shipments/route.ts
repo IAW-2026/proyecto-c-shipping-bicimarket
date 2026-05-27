@@ -24,7 +24,7 @@ import {
   ShipmentStatus,
   StatusHistorySource,
   TrackingEventType,
-} from "@/generated/prisma/enums";
+} from "@/generated/prisma/client";
 
 const bodySchema = z.object({
   seller_profile_id: z.string().min(1),

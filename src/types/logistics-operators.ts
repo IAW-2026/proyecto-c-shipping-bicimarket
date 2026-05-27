@@ -1,7 +1,7 @@
 import type {
   VehicleType as PrismaVehicleType,
   OperatorStatus as PrismaOperatorStatus,
-} from "@/generated/prisma/enums";
+} from "@/generated/prisma/client";
 
 export type VehicleType = "motorcycle" | "car" | "van" | "truck";
 export type OperatorStatus = "active" | "inactive" | "suspended";

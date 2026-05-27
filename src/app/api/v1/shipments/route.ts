@@ -13,7 +13,7 @@ import { ApiError, handleApiError } from "@/lib/api-error";
 import { paginate } from "@/lib/pagination";
 import { toShipmentDTO } from "@/lib/dto";
 import { createShipmentSchema } from "@/validation/shipments";
-import { ShipmentStatus, TrackingEventType, StatusHistorySource } from "@/generated/prisma/enums";
+import { ShipmentStatus, TrackingEventType, StatusHistorySource } from "@/generated/prisma/client";
 import type { Prisma } from "@/generated/prisma/client";
 
 // ── POST ───────────────────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-import type { ShipmentStatus as PrismaShipmentStatus } from "@/generated/prisma/enums";
+import type { ShipmentStatus as PrismaShipmentStatus } from "@/generated/prisma/client";
 import type { Address } from "./common";
 import type { PackageDTO } from "./packages";
 

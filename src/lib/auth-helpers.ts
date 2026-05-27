@@ -2,7 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
 import { generateId } from "@/lib/ids";
 import type { LogisticsOperator } from "@/generated/prisma/client";
-import { OperatorStatus, VehicleType } from "@/generated/prisma/enums";
+import { OperatorStatus, VehicleType } from "@/generated/prisma/client";
 
 /**
  * Helper de auth para route handlers que requieren un operador logístico
