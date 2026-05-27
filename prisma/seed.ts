@@ -18,7 +18,7 @@
 
 import "dotenv/config";
 import { PrismaClient } from "../src/generated/prisma/client";
-import { ServiceLevel } from "../src/generated/prisma/enums";
+import { ServiceLevel } from "../src/generated/prisma/client";
 
 const prisma = new PrismaClient();
 
