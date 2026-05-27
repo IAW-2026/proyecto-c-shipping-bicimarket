@@ -18,7 +18,7 @@
 // Refs opacas a otras apps (string, sin FK): ord_, osg_, sor_, slp_, byp_, pay_
 
 generator client {
-  provider = "prisma-client"
+  provider = "prisma-client-js"
   output   = "../src/generated/prisma"
 }
 
