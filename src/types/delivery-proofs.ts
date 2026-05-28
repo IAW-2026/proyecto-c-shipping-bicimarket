@@ -5,7 +5,7 @@
 export interface DeliveryProofDTO {
   id: string;
   shipment_id: string;
-  proof_photo_url: string;
+  proof_photo_url: string | null;
   signature_image_url: string | null;
   note: string | null;
   delivered_at: string;

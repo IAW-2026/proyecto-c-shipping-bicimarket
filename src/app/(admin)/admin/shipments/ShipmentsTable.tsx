@@ -21,6 +21,7 @@ export function ShipmentsTable() {
   const filters: ShipmentsAdminFilters = {
     tracking_number: getParam("tracking_number") ?? undefined,
     seller_profile_id: getParam("seller_profile_id") ?? undefined,
+    order_id: getParam("order_id") ?? undefined,
     status: (getArrayParam("status") as ShipmentStatus[]) ?? undefined,
     created_at_from: getParam("created_at_from") ?? undefined,
     created_at_to: getParam("created_at_to") ?? undefined,
@@ -34,6 +35,7 @@ export function ShipmentsTable() {
   const hasActiveFilters =
     !!filters.tracking_number ||
     !!filters.seller_profile_id ||
+    !!filters.order_id ||
     (filters.status?.length ?? 0) > 0 ||
     !!filters.created_at_from ||
     !!filters.created_at_to;
@@ -51,6 +53,7 @@ export function ShipmentsTable() {
     setMultipleParams({
       tracking_number: null,
       seller_profile_id: null,
+      order_id: null,
       status: null,
       created_at_from: null,
       created_at_to: null,

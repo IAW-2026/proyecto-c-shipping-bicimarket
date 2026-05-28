@@ -86,6 +86,7 @@ export interface PatchShipmentStatusBody {
 export interface ShipmentsAdminFilters {
   tracking_number?: string;
   seller_profile_id?: string;
+  order_id?: string;
   status?: ShipmentStatus[];
   created_at_from?: string;
   created_at_to?: string;

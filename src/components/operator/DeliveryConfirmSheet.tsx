@@ -24,13 +24,14 @@ interface DeliveryConfirmSheetProps {
 }
 
 /**
- * Sheet con foto obligatoria. Flujo:
- *   1. El operador toca "Tomar foto" → captura desde la cámara.
+ * Sheet con foto OPCIONAL (la captura desde mobile a veces falla por tamaño /
+ * permisos; el operador debe poder cerrar la entrega igual). Flujo:
+ *   1. (Opcional) El operador toca "Tomar foto" → captura desde la cámara.
  *   2. Mostramos preview con URL local (createObjectURL).
  *   3. Al confirmar:
- *      a. Subimos la foto a Supabase Storage via /api/v1/uploads/delivery-proof
- *      b. Recibimos la URL pública
- *      c. La mandamos al endpoint /shipments/{id}/deliver junto con la nota
+ *      a. Si hay foto, la subimos a /api/v1/uploads/delivery-proof
+ *      b. Si la subida falla, avisamos pero permitimos reintentar sin foto
+ *      c. Mandamos /shipments/{id}/deliver con la URL (o sin ella)
  *      d. El backend crea: tracking_event delivered + delivery_proof +
  *         shipment.status=delivered + status_history.
  *
@@ -69,34 +70,41 @@ export function DeliveryConfirmSheet({
   }
 
   async function handleConfirm() {
-    if (!file) return;
-    try {
-      setUploading(true);
-      // 1. Upload a Supabase Storage
-      const uploaded = await uploadDeliveryProof(file);
-      setUploading(false);
+    let proofUrl: string | undefined;
 
-      // 2. Disparar el endpoint deliver con la URL pública
-      deliver.mutate(
-        {
-          proof_photo_url: uploaded.url,
-          note: note || undefined,
-          occurred_at: new Date().toISOString(),
-        },
-        {
-          onSuccess: () => {
-            reset();
-            onOpenChange(false);
-            router.push("/dashboard/assignments");
-          },
-        },
-      );
-    } catch (err) {
-      setUploading(false);
-      const msg =
-        err instanceof Error ? err.message : "Error subiendo la foto";
-      toast.error("No pudimos subir la foto", { description: msg });
+    // 1. Si hay foto, intentar subir. Si falla, avisamos y seguimos sin foto
+    //    para no bloquear al operador (mobile a veces falla por tamaño).
+    if (file) {
+      try {
+        setUploading(true);
+        const uploaded = await uploadDeliveryProof(file);
+        proofUrl = uploaded.url;
+      } catch (err) {
+        const msg =
+          err instanceof Error ? err.message : "Error subiendo la foto";
+        toast.warning("No pudimos subir la foto, confirmamos sin ella", {
+          description: msg,
+        });
+      } finally {
+        setUploading(false);
+      }
     }
+
+    // 2. Disparar el endpoint deliver — proof_photo_url es opcional
+    deliver.mutate(
+      {
+        ...(proofUrl && { proof_photo_url: proofUrl }),
+        note: note || undefined,
+        occurred_at: new Date().toISOString(),
+      },
+      {
+        onSuccess: () => {
+          reset();
+          onOpenChange(false);
+          router.push("/dashboard/assignments");
+        },
+      },
+    );
   }
 
   const busy = uploading || deliver.isPending;
@@ -115,7 +123,10 @@ export function DeliveryConfirmSheet({
           {/* Foto */}
           <div className="space-y-2">
             <Label className="text-sm font-medium">
-              Foto del paquete <span className="text-destructive">*</span>
+              Foto del paquete{" "}
+              <span className="font-normal text-muted-foreground">
+                (opcional)
+              </span>
             </Label>
 
             {previewUrl ? (
@@ -189,7 +200,7 @@ export function DeliveryConfirmSheet({
         <SheetFooter className="gap-2">
           <Button
             size="lg"
-            disabled={!file || busy}
+            disabled={busy}
             onClick={handleConfirm}
           >
             {uploading ? (
@@ -205,7 +216,7 @@ export function DeliveryConfirmSheet({
             ) : (
               <>
                 <Check className="size-4" />
-                Confirmar entrega
+                {file ? "Confirmar entrega" : "Confirmar sin foto"}
               </>
             )}
           </Button>

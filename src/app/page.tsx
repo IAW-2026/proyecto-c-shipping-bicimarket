@@ -1,16 +1,20 @@
 import Link from "next/link";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { ArrowRight, ExternalLink, Package } from "lucide-react";
+import { ArrowRight, Package, Search } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import { resolveLandingPath } from "@/lib/auth-helpers";
+import { LandingBackground } from "./_components/LandingBackground";
 
 /**
  * Landing pública. Mockup: `desing -references/Landing.png`.
  *
  * - Si hay sesión activa → redirect a la pantalla que corresponde según rol
  *   (admin / operador / forbidden), via resolveLandingPath.
- * - Si no, render del card central con CTA "Iniciar sesión".
+ * - Si no, render del card central con CTAs: "Seguir un envío" (tracking
+ *   público, hero) e "Iniciar sesión" (operadores/admin).
+ *
+ * Fondo animado con blobs blur (motion/react) — ver LandingBackground.
  */
 export default async function Home() {
   const { userId, sessionClaims } = await auth();
@@ -20,8 +24,10 @@ export default async function Home() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col bg-background text-foreground">
-      <header className="mx-auto flex w-full max-w-5xl items-center justify-between px-6 py-6">
+    <div className="relative flex min-h-screen flex-col overflow-hidden bg-background text-foreground">
+      <LandingBackground />
+
+      <header className="relative z-10 mx-auto flex w-full max-w-5xl items-center justify-between px-6 py-6">
         <div className="flex items-center gap-2">
           <span className="flex size-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
             <Package className="size-4" />
@@ -33,20 +39,11 @@ export default async function Home() {
             </p>
           </div>
         </div>
-        <a
-          href="https://bicimarket.com"
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        >
-          bicimarket.com
-          <ExternalLink className="size-3.5" />
-        </a>
       </header>
 
-      <main className="flex flex-1 items-center justify-center px-6">
+      <main className="relative z-10 flex flex-1 items-center justify-center px-6">
         <div className="w-full max-w-md space-y-6 text-center">
-          <div className="mx-auto flex size-16 items-center justify-center rounded-2xl bg-primary/10">
+          <div className="mx-auto flex size-16 items-center justify-center rounded-2xl bg-primary/15 backdrop-blur-sm">
             <Package className="size-8 text-primary" strokeWidth={1.75} />
           </div>
 
@@ -62,41 +59,43 @@ export default async function Home() {
             </p>
           </div>
 
-          <div className="flex flex-col items-center gap-3 pt-2">
-            <Link
-              href="/sign-in"
-              className={buttonVariants({
-                size: "lg",
-                className: "h-11 w-full px-4",
-              })}
-            >
-              Iniciar sesión
-              <ArrowRight className="size-4" />
-            </Link>
-            <a
-              href="mailto:soporte@bicimarket.com"
-              className={buttonVariants({ variant: "ghost", size: "sm" })}
-            >
-              Soporte
-            </a>
-          </div>
+          {/* Hero CTA: tracking público */}
+          <Link
+            href="/track"
+            className={buttonVariants({
+              size: "lg",
+              className:
+                "h-14 w-full gap-3 rounded-xl px-5 text-base font-semibold shadow-lg shadow-primary/20 transition-transform hover:scale-[1.02]",
+            })}
+          >
+            <Search className="size-5" />
+            Seguir un envío
+            <ArrowRight className="ml-auto size-5" />
+          </Link>
 
-          <div className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground">
-            <span className="size-1.5 rounded-full bg-emerald-500" />
-            Servicios operativos · v2.4.0
+          {/* CTA secundario: login operador/admin */}
+          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+            <span className="h-px flex-1 bg-border" />
+            <span>¿Operador o admin?</span>
+            <span className="h-px flex-1 bg-border" />
           </div>
+          <Link
+            href="/sign-in"
+            className={buttonVariants({
+              variant: "outline",
+              size: "lg",
+              className: "h-11 w-full bg-card/70 px-4 backdrop-blur-sm",
+            })}
+          >
+            Iniciar sesión
+            <ArrowRight className="size-4" />
+          </Link>
+
         </div>
       </main>
 
-      <footer className="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-2 px-6 py-6 text-xs text-muted-foreground">
-        <p>© 2026 BiciMarket S.A.</p>
-        <p className="flex items-center gap-3">
-          <a href="#" className="hover:text-foreground">Términos</a>
-          <span>·</span>
-          <a href="#" className="hover:text-foreground">Privacidad</a>
-          <span>·</span>
-          <span>Hecho con ♥ en Argentina</span>
-        </p>
+      <footer className="relative z-10 mx-auto flex w-full max-w-5xl items-center justify-center px-6 py-6 text-xs text-muted-foreground">
+        <p>Hecho con ♥ en Argentina</p>
       </footer>
     </div>
   );

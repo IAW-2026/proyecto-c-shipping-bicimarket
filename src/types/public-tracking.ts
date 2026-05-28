@@ -49,7 +49,7 @@ export interface PublicTrackingDTO {
 
   // Prueba de entrega (solo si delivered)
   proof?: {
-    photo_url: string;
+    photo_url: string | null;
     note: string | null;
     delivered_at: string;
   };

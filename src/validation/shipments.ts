@@ -78,12 +78,12 @@ export const createTrackingEventSchema = z.object({
 });
 
 // ─── POST /api/v1/shipments/{id}/deliver ───────────────────────────────────
-// Sprint 1: proof_photo_url puede ser URL o "data:image/jpeg;base64,…".
-// Validamos solo min length; el route handler puede sumar checks de tamaño
-// si el base64 viene del cliente.
+// proof_photo_url es OPCIONAL: en mobile la captura/subida puede fallar y el
+// operador debe poder cerrar la entrega igual. Si viene, validamos URL/base64
+// con min length; si no, se guarda null en DeliveryProof.
 
 export const deliverShipmentSchema = z.object({
-  proof_photo_url: z.string().min(1),
+  proof_photo_url: z.string().min(1).optional(),
   signature_image_url: z.string().min(1).optional(),
   note: z.string().optional(),
   occurred_at: z.string().datetime(),

@@ -52,21 +52,28 @@ export function DeliveryProofCard({
         <Skeleton className="aspect-video w-full" />
       ) : (
         <>
-          <a
-            href={proof.proof_photo_url}
-            target="_blank"
-            rel="noreferrer"
-            className="group block overflow-hidden rounded-lg border border-border"
-            aria-label="Abrir foto en tamaño completo"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={proof.proof_photo_url}
-              alt="Prueba de entrega"
-              className="aspect-video w-full bg-muted object-cover transition-opacity group-hover:opacity-90"
-              loading="lazy"
-            />
-          </a>
+          {proof.proof_photo_url ? (
+            <a
+              href={proof.proof_photo_url}
+              target="_blank"
+              rel="noreferrer"
+              className="group block overflow-hidden rounded-lg border border-border"
+              aria-label="Abrir foto en tamaño completo"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={proof.proof_photo_url}
+                alt="Prueba de entrega"
+                className="aspect-video w-full bg-muted object-cover transition-opacity group-hover:opacity-90"
+                loading="lazy"
+              />
+            </a>
+          ) : (
+            <div className="flex aspect-video w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border bg-muted/30 text-xs text-muted-foreground">
+              <Camera className="size-5" strokeWidth={1.5} />
+              <span>Entrega sin foto</span>
+            </div>
+          )}
 
           <div className="space-y-1.5 text-sm">
             <div className="flex items-baseline justify-between gap-3">
@@ -82,15 +89,17 @@ export function DeliveryProofCard({
             )}
           </div>
 
-          <a
-            href={proof.proof_photo_url}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
-          >
-            Abrir foto en pestaña nueva
-            <ExternalLink className="size-3" />
-          </a>
+          {proof.proof_photo_url && (
+            <a
+              href={proof.proof_photo_url}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+            >
+              Abrir foto en pestaña nueva
+              <ExternalLink className="size-3" />
+            </a>
+          )}
         </>
       )}
     </section>

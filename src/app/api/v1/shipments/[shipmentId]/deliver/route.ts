@@ -57,7 +57,7 @@ export async function POST(
         data: {
           id: generateId("prf"),
           shipmentId,
-          proofPhotoUrl: body.proof_photo_url,
+          proofPhotoUrl: body.proof_photo_url ?? null,
           signatureImageUrl: body.signature_image_url ?? null,
           note: body.note ?? null,
           deliveredAt: occurredAt,

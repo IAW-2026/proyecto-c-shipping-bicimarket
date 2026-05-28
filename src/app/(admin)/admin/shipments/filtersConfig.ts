@@ -33,6 +33,11 @@ export const filterConfigsShipments: FilterConfig[] = [
     placeholder: "Seller ID",
   },
   {
+    columnId: "order_id",
+    type: "input",
+    placeholder: "Pedido (ord_…)",
+  },
+  {
     columnId: "created_at",
     type: "date-range",
     placeholder: "Fecha de creación",

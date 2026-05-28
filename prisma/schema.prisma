@@ -296,15 +296,15 @@ model DeliveryAssignment {
 
 // ─── 8. DeliveryProof (1:1 con Shipment) ───────────────────────────────────
 // Inmutable. Un shipment tiene a lo sumo un proof (el del delivered).
-// Sprint 1: proofPhotoUrl puede ser "data:image/jpeg;base64,…" inline.
-// Sprint 2: pasaría a URL real de Supabase Storage.
+// proofPhotoUrl es opcional: en mobile la subida puede fallar por tamaño /
+// permisos de cámara y el operador debe poder cerrar la entrega igual.
 
 model DeliveryProof {
   id         String   @id // prf_…
   shipmentId String   @unique @map("shipment_id")
   shipment   Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
 
-  proofPhotoUrl     String   @map("proof_photo_url")
+  proofPhotoUrl     String?  @map("proof_photo_url")
   signatureImageUrl String?  @map("signature_image_url")
   note              String?
   deliveredAt       DateTime @map("delivered_at")

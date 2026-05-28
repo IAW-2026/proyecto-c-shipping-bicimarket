@@ -246,13 +246,19 @@ function ProofCard({
           {formatDateLong(proof.delivered_at)}
         </span>
       </div>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={proof.photo_url}
-        alt="Prueba de entrega"
-        className="aspect-video w-full rounded-lg border border-border object-cover"
-        loading="lazy"
-      />
+      {proof.photo_url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={proof.photo_url}
+          alt="Prueba de entrega"
+          className="aspect-video w-full rounded-lg border border-border object-cover"
+          loading="lazy"
+        />
+      ) : (
+        <div className="flex aspect-video w-full items-center justify-center rounded-lg border border-dashed border-border bg-card text-xs text-muted-foreground">
+          Entrega sin foto
+        </div>
+      )}
       {proof.note && (
         <p className="rounded-md border border-border bg-card px-2.5 py-1.5 text-xs italic text-foreground/80">
           “{proof.note}”

@@ -4,9 +4,10 @@ import { createAdminShipment } from "@/services/api/shipments";
 import type { CreateAdminShipmentBody } from "@/types/admin-shipments";
 
 /**
- * Mutation dev-only para crear envíos manualmente desde /admin/shipments/new.
- * Invalida la lista admin + my-assignments (porque el nuevo envío arranca
- * como "Disponible" para cualquier operador).
+ * Mutation dev-only para crear pedidos multi-origen desde /admin/shipments/new.
+ * Crea N shipments (uno por origen) compartiendo un único order_id. Invalida la
+ * lista admin + my-assignments (los nuevos shipments arrancan como
+ * "Disponibles" para cualquier operador).
  */
 export function useAdminCreateShipment() {
   return useApiMutation({
@@ -16,6 +17,6 @@ export function useAdminCreateShipment() {
       ["shipments", "kpis"],
       ["my-assignments"],
     ],
-    successMessage: "Envío creado",
+    successMessage: "Pedido creado",
   });
 }

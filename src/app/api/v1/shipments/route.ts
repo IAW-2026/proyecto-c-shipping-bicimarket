@@ -191,6 +191,7 @@ export async function GET(req: NextRequest) {
 
     const trackingNumber = searchParams.get("tracking_number");
     const sellerProfileId = searchParams.get("seller_profile_id");
+    const orderIdFilter = searchParams.get("order_id");
     const statusArr = searchParams.getAll("status[]");
     const createdFrom = searchParams.get("created_at_from");
     const createdTo = searchParams.get("created_at_to");
@@ -202,6 +203,7 @@ export async function GET(req: NextRequest) {
         trackingNumber: { contains: trackingNumber, mode: "insensitive" },
       }),
       ...(sellerProfileId && { sellerProfileId }),
+      ...(orderIdFilter && { orderId: orderIdFilter }),
       ...(statusArr.length > 0 && {
         status: { in: statusArr as ShipmentStatus[] },
       }),

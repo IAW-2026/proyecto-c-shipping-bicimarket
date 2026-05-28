@@ -40,11 +40,11 @@ export interface CreateTrackingEventBody {
 
 /**
  * Body de POST /api/v1/shipments/{id}/deliver (docs/03 §SH4 deliver).
- * Sprint 1: proof_photo_url puede venir como "data:image/jpeg;base64,…".
- * Sprint 2: pasaría a URL real de Supabase Storage.
+ * proof_photo_url es opcional — en mobile la captura puede fallar y el
+ * operador debe poder cerrar la entrega igual.
  */
 export interface DeliverShipmentBody {
-  proof_photo_url: string;
+  proof_photo_url?: string;
   signature_image_url?: string;
   note?: string;
   occurred_at: string;
@@ -55,7 +55,7 @@ export interface DeliverShipmentResponse {
   status: "delivered";
   delivered_at: string;
   proof: {
-    photo_url: string;
+    photo_url: string | null;
     signature_url: string | null;
     note: string | null;
   };

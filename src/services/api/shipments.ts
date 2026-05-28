@@ -16,7 +16,10 @@ import type {
 } from "@/types/tracking-events";
 import type { ShipmentStatusHistoryDTO } from "@/types/shipment-status-history";
 import type { ShipmentsKpisDTO } from "@/types/admin-kpis";
-import type { CreateAdminShipmentBody } from "@/types/admin-shipments";
+import type {
+  CreateAdminShipmentBody,
+  CreateAdminShipmentResponse,
+} from "@/types/admin-shipments";
 
 // ── GETs ───────────────────────────────────────────────────────────────────
 
@@ -41,6 +44,7 @@ export async function listShipmentsAdmin(
 
   if (filters.tracking_number) params.set("tracking_number", filters.tracking_number);
   if (filters.seller_profile_id) params.set("seller_profile_id", filters.seller_profile_id);
+  if (filters.order_id) params.set("order_id", filters.order_id);
   if (filters.status?.length) {
     for (const s of filters.status) params.append("status[]", s);
   }
@@ -121,11 +125,17 @@ export async function deliverShipment(
   return res.data;
 }
 
-/** Dev-only: crea quote + shipment + packages en una transacción. */
+/**
+ * Dev-only: crea un pedido multi-origen. N shipments compartiendo orderId,
+ * quote multi-pickup en una transacción.
+ */
 export async function createAdminShipment(
   body: CreateAdminShipmentBody,
-): Promise<ShipmentDTO> {
-  const res = await api.post<ShipmentDTO>("/v1/admin/shipments", body);
+): Promise<CreateAdminShipmentResponse> {
+  const res = await api.post<CreateAdminShipmentResponse>(
+    "/v1/admin/shipments",
+    body,
+  );
   return res.data;
 }
 
