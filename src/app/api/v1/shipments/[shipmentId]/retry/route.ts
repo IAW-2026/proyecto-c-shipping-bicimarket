@@ -128,6 +128,8 @@ export async function POST(
           carrier: original.carrier,
           serviceLevel: original.serviceLevel,
           trackingNumber: newTrackingNumber,
+          // ADR-005: el retry hereda el tracking del pedido (mismo order_id).
+          orderTrackingNumber: original.orderTrackingNumber,
           labelUrl: "/labels/sample.pdf",
           status: ShipmentStatus.ready_for_pickup,
           weightGramsTotal: original.weightGramsTotal,

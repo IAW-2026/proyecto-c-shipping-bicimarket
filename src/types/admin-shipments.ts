@@ -33,14 +33,16 @@ export interface CreateAdminShipmentBody {
 }
 
 /**
- * Respuesta del POST: el `order_id` agrupa los N shipments. `ordered_sequence`
- * son los índices de `body.pickups` en el orden óptimo de visita. El costo
- * total se reparte proporcional al peso entre los N shipments individuales.
+ * Respuesta del POST: el `order_id` agrupa los N shipments. ADR-005: el costo
+ * se calcula como suma de tramos individuales (cada origen → destino) con
+ * descuento por cantidad de orígenes. El `total_net_cents` es la suma de los
+ * `cost_cents` de cada shipment generado.
  */
 export interface CreateAdminShipmentResponse {
   order_id: string;
-  total_distance_km: number;
-  ordered_sequence: number[];
-  total_cost_cents: number;
+  origins_count: number;
+  discount_pct: number;
+  total_gross_cents: number;
+  total_net_cents: number;
   shipments: ShipmentDTO[];
 }

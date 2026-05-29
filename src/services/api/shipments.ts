@@ -20,6 +20,7 @@ import type {
   CreateAdminShipmentBody,
   CreateAdminShipmentResponse,
 } from "@/types/admin-shipments";
+import type { ShipmentGroupDTO } from "@/types/shipment-groups";
 
 // ── GETs ───────────────────────────────────────────────────────────────────
 
@@ -53,6 +54,39 @@ export async function listShipmentsAdmin(
 
   const res = await api.get<PaginatedResponse<ShipmentDTO>>(
     `/v1/shipments?${params.toString()}`,
+  );
+  return res.data;
+}
+
+/**
+ * ADR-005: listado de la tabla admin agrupado por order_id. Cada item es un
+ * pedido con sus N shipments. Filtros y sort son los mismos que listShipmentsAdmin.
+ */
+export async function listShipmentGroupsAdmin(
+  filters: ShipmentsAdminFilters,
+  page: number,
+  perPage: number,
+  sortBy: string,
+  sortDir: "asc" | "desc",
+): Promise<PaginatedResponse<ShipmentGroupDTO>> {
+  const params = new URLSearchParams({
+    page: String(page),
+    per_page: String(perPage),
+    sort_by: sortBy,
+    sort_dir: sortDir,
+  });
+
+  if (filters.tracking_number) params.set("tracking_number", filters.tracking_number);
+  if (filters.seller_profile_id) params.set("seller_profile_id", filters.seller_profile_id);
+  if (filters.order_id) params.set("order_id", filters.order_id);
+  if (filters.status?.length) {
+    for (const s of filters.status) params.append("status[]", s);
+  }
+  if (filters.created_at_from) params.set("created_at_from", filters.created_at_from);
+  if (filters.created_at_to) params.set("created_at_to", filters.created_at_to);
+
+  const res = await api.get<PaginatedResponse<ShipmentGroupDTO>>(
+    `/v1/admin/shipment-groups?${params.toString()}`,
   );
   return res.data;
 }

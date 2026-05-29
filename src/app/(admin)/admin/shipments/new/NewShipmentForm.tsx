@@ -22,7 +22,8 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { useAdminCreateShipment } from "@/hooks/querys/shipments/useAdminCreateShipment";
 import { geocodePostalCode } from "@/lib/geo/ar-postal-codes";
-import { bestRoute } from "@/lib/geo/route";
+import { distanceBetweenPostalCodes } from "@/lib/geo/distance";
+import { multiOriginDiscountFactor } from "@/lib/multi-origin-discount";
 import { PostalCodeCombobox } from "@/components/shipping/PostalCodeCombobox";
 import type { ServiceLevel } from "@/types/shipments";
 import type { CreateAdminShipmentBody } from "@/types/admin-shipments";
@@ -110,16 +111,19 @@ export function NewShipmentForm() {
     setValues((v) => ({ ...v, [key]: value }));
   }
 
-  // Resuelve la ruta óptima en cliente para mostrar preview live (mismo algo
-  // que el backend, así no hay sorpresas al submit).
-  type RoutePreview =
+  // ADR-005: preview de cotización por suma de tramos + descuento por
+  // cantidad de orígenes. Reemplaza el TSP del modelo anterior — cada origen
+  // cotiza independiente y se aplica un descuento lineal sobre la suma.
+  // Como no tenemos acceso a las tarifas reales desde el cliente, mostramos
+  // distancias y porcentaje de descuento; el costo final se calcula al
+  // crear el pedido.
+  type CostPreview =
     | {
         ok: true;
-        totalKm: number;
-        orderedSequence: number[];
         destCity: string;
-        missingDest?: undefined;
-        unknownPickupIndexes?: undefined;
+        legs: Array<{ index: number; sellerId: string; km: number }>;
+        totalKm: number;
+        discountPct: number;
       }
     | {
         ok: false;
@@ -127,7 +131,7 @@ export function NewShipmentForm() {
         unknownPickupIndexes?: number[];
       };
 
-  const routePreview = useMemo<RoutePreview | null>(() => {
+  const costPreview = useMemo<CostPreview | null>(() => {
     const destCp = values.ship_postal.trim().toUpperCase();
     if (!destCp) return null;
     const destEntry = geocodePostalCode(destCp);
@@ -135,29 +139,37 @@ export function NewShipmentForm() {
       return { ok: false, missingDest: destCp };
     }
     const unknownIdx: number[] = [];
-    const points: { lat: number; lng: number }[] = [];
+    const legs: Array<{ index: number; sellerId: string; km: number }> = [];
     for (let i = 0; i < values.pickups.length; i++) {
       const cp = values.pickups[i].pickup_postal.trim().toUpperCase();
-      if (!cp) return null; // todavía está completando
+      if (!cp) return null; // el usuario todavía está completando
       const entry = geocodePostalCode(cp);
       if (!entry) {
         unknownIdx.push(i);
-      } else {
-        points.push({ lat: entry.lat, lng: entry.lng });
+        continue;
       }
+      const km = distanceBetweenPostalCodes(cp, destCp);
+      if (km === null) {
+        unknownIdx.push(i);
+        continue;
+      }
+      legs.push({
+        index: i,
+        sellerId: values.pickups[i].seller_profile_id || `#${i + 1}`,
+        km,
+      });
     }
     if (unknownIdx.length > 0) {
       return { ok: false, unknownPickupIndexes: unknownIdx };
     }
-    const route = bestRoute(points, {
-      lat: destEntry.lat,
-      lng: destEntry.lng,
-    });
+    const totalKm = legs.reduce((s, l) => s + l.km, 0);
+    const discountPct = multiOriginDiscountFactor(legs.length);
     return {
       ok: true,
-      totalKm: route.totalKm,
-      orderedSequence: route.orderedSequence,
       destCity: destEntry.city,
+      legs,
+      totalKm,
+      discountPct,
     };
   }, [values.pickups, values.ship_postal]);
 
@@ -306,7 +318,7 @@ export function NewShipmentForm() {
   }
 
   const submitDisabled =
-    isPending || (routePreview !== null && !routePreview.ok);
+    isPending || (costPreview !== null && !costPreview.ok);
 
   return (
     <form
@@ -423,8 +435,8 @@ export function NewShipmentForm() {
         <div className="space-y-3">
           {values.pickups.map((p, i) => {
             const unknownIdxs =
-              routePreview && !routePreview.ok
-                ? routePreview.unknownPickupIndexes
+              costPreview && !costPreview.ok
+                ? costPreview.unknownPickupIndexes
                 : undefined;
             const isUnknownCp = unknownIdxs?.includes(i) ?? false;
             return (
@@ -623,58 +635,75 @@ export function NewShipmentForm() {
         </div>
       </Section>
 
-      {/* Preview de ruta */}
-      {routePreview && (
-        routePreview.ok ? (
-          <div className="space-y-1.5 rounded-lg border border-primary/30 bg-primary/10 px-3 py-2 text-sm text-primary">
-            <div className="flex items-center gap-2">
-              <Truck className="size-4 shrink-0" />
-              <span>
-                Ruta óptima · ≈{" "}
-                <span className="font-semibold tabular-nums">
-                  {routePreview.totalKm} km
+      {/* Preview de cotización (ADR-005: suma de tramos + descuento) */}
+      {costPreview && (
+        costPreview.ok ? (
+          <div className="space-y-2 rounded-lg border border-primary/30 bg-primary/10 p-3 text-sm text-primary">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Truck className="size-4 shrink-0" />
+                <span>
+                  {costPreview.legs.length === 1
+                    ? "Cotización single-origen"
+                    : `${costPreview.legs.length} orígenes`}{" "}
+                  → <MapPin className="inline size-3" />{" "}
+                  <span className="font-medium">{costPreview.destCity}</span>
                 </span>
-              </span>
+              </div>
+              {costPreview.discountPct > 0 && (
+                <span className="rounded-full bg-primary/20 px-2 py-0.5 text-[11px] font-semibold">
+                  Descuento multi-origen ·{" "}
+                  {(costPreview.discountPct * 100).toFixed(0)}%
+                </span>
+              )}
             </div>
-            <div className="flex flex-wrap items-center gap-1 pl-6 text-xs">
-              {routePreview.orderedSequence.map((idx, i) => {
-                const slp = values.pickups[idx].seller_profile_id || `#${idx + 1}`;
-                return (
-                  <span
-                    key={idx}
-                    className="inline-flex items-center gap-1"
-                  >
+            <ul className="space-y-1 pl-6 text-xs">
+              {costPreview.legs.map((leg) => (
+                <li
+                  key={leg.index}
+                  className="flex items-center justify-between gap-2"
+                >
+                  <span className="inline-flex items-center gap-1">
                     <span className="rounded bg-primary/15 px-1.5 py-0.5 font-mono">
-                      {slp}
+                      {leg.sellerId}
                     </span>
-                    {i < routePreview.orderedSequence.length - 1 && (
-                      <ArrowRight className="size-3 opacity-60" />
-                    )}
+                    <ArrowRight className="size-3 opacity-60" />
+                    <span>{costPreview.destCity}</span>
                   </span>
-                );
-              })}
-              <ArrowRight className="size-3 opacity-60" />
-              <span className="rounded bg-primary/15 px-1.5 py-0.5">
-                <MapPin className="inline size-3" /> {routePreview.destCity}
+                  <span className="tabular-nums">≈ {leg.km} km</span>
+                </li>
+              ))}
+            </ul>
+            <p className="pl-6 text-[11px] opacity-80">
+              Suma de tramos · ≈{" "}
+              <span className="font-semibold tabular-nums">
+                {costPreview.totalKm} km
               </span>
-            </div>
+              {costPreview.discountPct > 0 && (
+                <>
+                  {" "}
+                  · costo final con −{(costPreview.discountPct * 100).toFixed(0)}%
+                  aplicado al sumar las tarifas matcheadas
+                </>
+              )}
+            </p>
           </div>
         ) : (
           <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
             <AlertTriangle className="mt-0.5 size-4 shrink-0" />
             <div className="space-y-0.5">
               <p className="font-semibold">Cobertura incompleta</p>
-              {routePreview.missingDest ? (
+              {costPreview.missingDest ? (
                 <p className="text-xs opacity-80">
                   El CP destino{" "}
-                  <span className="font-mono">{routePreview.missingDest}</span>{" "}
+                  <span className="font-mono">{costPreview.missingDest}</span>{" "}
                   no está en nuestro dataset.
                 </p>
-              ) : routePreview.unknownPickupIndexes ? (
+              ) : costPreview.unknownPickupIndexes ? (
                 <p className="text-xs opacity-80">
                   Los siguientes orígenes tienen CP desconocido:{" "}
                   <span className="font-mono">
-                    {routePreview.unknownPickupIndexes
+                    {costPreview.unknownPickupIndexes
                       .map((i) => `#${i + 1}`)
                       .join(", ")}
                   </span>

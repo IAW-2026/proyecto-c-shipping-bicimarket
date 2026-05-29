@@ -30,7 +30,11 @@ export const _assignmentStatusCheck: _checkAssignmentStatus = true;
  */
 export interface AssignmentDTO {
   id: string; // shp_… del shipment (es el recurso principal en este endpoint)
-  tracking_number: string;
+  order_id: string; // ord_… — para agrupar shipments multi-vendedor en la UI (ADR-005)
+  seller_profile_id: string; // slp_… — distingue orígenes dentro del grupo
+  tracking_number: string; // TRK-AR-… individual del pickup
+  /** ADR-005: tracking del pedido entero (compartido entre siblings). */
+  order_tracking_number: string;
   status: ShipmentStatus;
   pickup_address: Address;
   shipping_address: Address;
@@ -59,7 +63,14 @@ export interface PatchAssignmentBody {
 export interface MyDeliveryDTO {
   id: string; // dla_… del assignment
   shipment_id: string; // shp_…
-  tracking_number: string;
+  tracking_number: string; // TRK individual del pickup
+  /**
+   * ADR-005: TRK del pedido entero (compartido con siblings). Cuando el
+   * delivery fue parte de un pedido multi-vendedor, este es el que el
+   * comprador vio.
+   */
+  order_tracking_number: string;
+  order_id: string;
   delivered_at: string; // ISO — assignment.completedAt
   shipping_address: Address;
   weight_grams_total: number;

@@ -67,6 +67,17 @@ export async function POST(req: NextRequest) {
     const shipmentId = generateId("shp");
     const trackingNumber = generateTrackingNumber();
 
+    // ADR-005: el tracking del PEDIDO se comparte entre todos los Shipment del
+    // mismo order_id. Si ya existe algún sibling, reusamos el suyo; si es el
+    // primer shipment de este order_id, generamos uno nuevo. Buyer expone solo
+    // este; operador/admin ven ambos.
+    const existingSibling = await prisma.shipment.findFirst({
+      where: { orderId: body.order_id },
+      select: { orderTrackingNumber: true },
+    });
+    const orderTrackingNumber =
+      existingSibling?.orderTrackingNumber ?? generateTrackingNumber();
+
     const result = await prisma.$transaction(async (tx) => {
       const shipment = await tx.shipment.create({
         data: {
@@ -80,6 +91,7 @@ export async function POST(req: NextRequest) {
           carrier: quote.carrier,
           serviceLevel: quote.serviceLevel,
           trackingNumber,
+          orderTrackingNumber,
           labelUrl: "/labels/sample.pdf", // sprint 1 placeholder
           status: ShipmentStatus.ready_for_pickup,
           weightGramsTotal: quote.weightGramsTotal,

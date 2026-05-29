@@ -58,6 +58,8 @@ export async function GET(req: NextRequest) {
         id: a.id,
         shipment_id: a.shipmentId,
         tracking_number: a.shipment.trackingNumber,
+        order_tracking_number: a.shipment.orderTrackingNumber,
+        order_id: a.shipment.orderId,
         // completedAt está garantizado en delivered (lo setea POST /deliver),
         // pero el schema lo permite nullable → fallback a updatedAt por las dudas.
         delivered_at: (a.completedAt ?? a.updatedAt).toISOString(),

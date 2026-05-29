@@ -4,9 +4,11 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import {
   ChevronLeft,
+  ChevronRight,
   Copy,
   Download,
   ExternalLink,
+  Info,
   Mail,
   RefreshCcw,
   RotateCcw,
@@ -59,6 +61,7 @@ export function ShipmentAdminDetail({ shipmentId }: ShipmentAdminDetailProps) {
   // muestra ese (no los históricos). Pueden existir varios de operadores
   // pasados con status `reassigned/cancelled/delivered` pero nos interesa el
   // que todavía está en juego.
+  
   const currentAssignment = assignmentsResp?.data.find((a) =>
     ["assigned", "accepted", "picked_up"].includes(a.status),
   ) ?? null;
@@ -109,11 +112,25 @@ export function ShipmentAdminDetail({ shipmentId }: ShipmentAdminDetailProps) {
         </Link>
 
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <h1 className="font-mono text-xl font-semibold">
-              {shipment.tracking_number}
-            </h1>
-            <StatusBadge status={shipment.status} />
+          <div className="space-y-1">
+            <div className="flex items-center gap-3">
+              <h1 className="font-mono text-xl font-semibold">
+                {shipment.tracking_number}
+              </h1>
+              <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                pickup
+              </span>
+              <StatusBadge status={shipment.status} />
+            </div>
+            {shipment.order_tracking_number &&
+              shipment.order_tracking_number !== shipment.tracking_number && (
+                <p className="font-mono text-xs text-muted-foreground">
+                  Pedido ·{" "}
+                  <span className="text-foreground">
+                    {shipment.order_tracking_number}
+                  </span>
+                </p>
+              )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <a
@@ -134,6 +151,46 @@ export function ShipmentAdminDetail({ shipmentId }: ShipmentAdminDetailProps) {
           </div>
         </div>
       </div>
+
+      {/* ADR-005: banner cuando es parte de un pedido multi-vendedor */}
+      {shipment.order_pickups && shipment.order_pickups.length > 1 && (
+        <section className="flex flex-wrap items-start gap-3 rounded-xl border border-primary/30 bg-primary/10 p-4">
+          <Info className="mt-0.5 size-4 shrink-0 text-primary" />
+          <div className="flex-1 space-y-2">
+            <p className="text-sm">
+              Este envío es{" "}
+              <strong>1 de {shipment.order_pickups.length}</strong> pickups
+              del pedido{" "}
+              <span className="font-mono">
+                {shipment.order_tracking_number}
+              </span>
+              . Los demás envíos del mismo pedido:
+            </p>
+            <ul className="flex flex-wrap gap-2 text-xs">
+              {shipment.order_pickups
+                .filter((p) => p.shipment_id !== shipment.id)
+                .map((p) => (
+                  <li key={p.shipment_id}>
+                    <Link
+                      href={`/admin/shipments/${p.shipment_id}`}
+                      className="inline-flex items-center gap-1 rounded-full border border-border bg-card px-2.5 py-1 font-mono hover:bg-muted"
+                    >
+                      {p.tracking_number} · {p.pickup_city}
+                      <ChevronRight className="size-3" />
+                    </Link>
+                  </li>
+                ))}
+            </ul>
+            <Link
+              href={`/admin/shipments?order_id=${encodeURIComponent(shipment.order_id)}&page=1`}
+              className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+            >
+              Ver el pedido en la tabla
+              <ChevronRight className="size-3" />
+            </Link>
+          </div>
+        </section>
+      )}
 
       {/* Mapa de ruta */}
       <ShipmentRouteMap
@@ -172,6 +229,13 @@ export function ShipmentAdminDetail({ shipmentId }: ShipmentAdminDetailProps) {
               Resumen
             </h2>
             <dl className="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+              <CopyField
+                label="Tracking del pedido"
+                value={shipment.order_tracking_number}
+                onCopy={() =>
+                  copy(shipment.order_tracking_number, "Tracking del pedido")
+                }
+              />
               <CopyField
                 label="Order ID"
                 value={shipment.order_id}

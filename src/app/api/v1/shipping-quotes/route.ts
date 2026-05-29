@@ -1,19 +1,20 @@
 // POST /api/v1/shipping-quotes — SH1 (docs/03)
 // Auth: S2S (X-Service-Token). Lo llama Buyer App durante el checkout.
 //
-// Usa el quote-engine que matchea (distancia × peso × service_level)
-// contra `shipping_rates`. La distancia se calcula con Haversine sobre
-// los CPs origen y destino (ver src/lib/geo/).
+// Desde ADR-005: el endpoint acepta siempre pickups[] (N>=1). Devuelve N
+// cotizaciones agrupadas con descuento aplicado por la fórmula
+// multiOriginDiscountFactor (0% para N=1, 5% por cada origen adicional
+// hasta tope de 20%). Reemplaza el body viejo single-origen.
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireServiceToken } from "@/lib/service-auth";
 import { generateId } from "@/lib/ids";
-import { ApiError, handleApiError } from "@/lib/api-error";
+import { handleApiError } from "@/lib/api-error";
 import { getMockPickupAddress } from "@/lib/mocks";
-import { toShippingQuoteDTO } from "@/lib/dto";
+import { toQuoteResponseDTO } from "@/lib/dto";
 import { createQuoteSchema } from "@/validation/shipping-quotes";
-import { findMatchingRate } from "@/lib/quote-engine";
+import { quoteMultiOriginSum } from "@/lib/quote-engine";
 
 const QUOTE_TTL_MS = 60 * 60 * 1000; // 60 min
 
@@ -25,62 +26,93 @@ export async function POST(req: NextRequest) {
     const body = createQuoteSchema.parse(await req.json());
     const idempotencyKey = req.headers.get("idempotency-key");
 
+    // Idempotencia: las N quotes se persisten con idempotencyKey
+    // `${K}:${idx}`. En POST repetido recuperamos por prefijo.
     if (idempotencyKey) {
-      const existing = await prisma.shippingQuote.findUnique({
-        where: { idempotencyKey },
+      const existing = await prisma.shippingQuote.findMany({
+        where: {
+          idempotencyKey: { startsWith: `${idempotencyKey}:` },
+        },
+        orderBy: { idempotencyKey: "asc" },
       });
-      if (existing) return NextResponse.json(toShippingQuoteDTO(existing));
+      if (existing.length > 0) {
+        // Reconstruimos los totales desde lo que ya está persistido.
+        const totalNet = existing.reduce((s, q) => s + q.costCents, 0);
+        // No tenemos el gross persistido — devolvemos totalNet en ambos
+        // campos. (En la práctica el cliente reintenta exactamente con la
+        // misma key y le importa identidad, no el desglose gross/net.)
+        return NextResponse.json(
+          toQuoteResponseDTO({
+            quotes: existing,
+            originsCount: existing.length,
+            discountPct: 0,
+            totalGrossCents: totalNet,
+            totalNetCents: totalNet,
+          }),
+        );
+      }
     }
 
-    // Sprint 1 / ADR-002: pickup_address mockeada
-    const pickupAddress = getMockPickupAddress(body.from.seller_profile_id);
+    // Sprint 1 / ADR-002: pickup_address mockeada (CR1).
+    const pickupsResolved = body.pickups.map((p) => {
+      const address = getMockPickupAddress(p.seller_profile_id);
+      const weightGramsTotal = p.packages.reduce(
+        (sum, pk) => sum + pk.weight_grams,
+        0,
+      );
+      return {
+        sellerProfileId: p.seller_profile_id,
+        address,
+        weightGramsTotal,
+        packages: p.packages,
+      };
+    });
 
-    const weightGramsTotal = body.packages.reduce(
-      (sum, p) => sum + p.weight_grams,
-      0,
-    );
-
-    // Motor de matching: si los CPs no están en el dataset tira 422
-    // POSTAL_CODE_UNKNOWN; si no hay rate para esa combinación devuelve null.
-    const matched = await findMatchingRate({
-      pickupPostalCode: pickupAddress.postal_code,
-      shippingPostalCode: body.to.postal_code,
-      weightGramsTotal,
+    const result = await quoteMultiOriginSum({
+      pickups: pickupsResolved.map((p) => ({
+        sellerProfileId: p.sellerProfileId,
+        postalCode: p.address.postal_code,
+        weightGramsTotal: p.weightGramsTotal,
+      })),
+      destinationPostalCode: body.to.postal_code,
       serviceLevel: body.service_level,
     });
 
-    if (!matched) {
-      throw new ApiError(
-        "RATE_NOT_FOUND",
-        422,
-        "No hay tarifa disponible para esos parámetros",
-        {
-          weight_grams_total: weightGramsTotal,
-          service_level: body.service_level,
-        },
-      );
-    }
+    const expiresAt = new Date(Date.now() + QUOTE_TTL_MS);
 
-    const quote = await prisma.shippingQuote.create({
-      data: {
-        id: generateId("qte"),
-        sellerProfileId: body.from.seller_profile_id,
-        fromAddressSnapshot: pickupAddress as unknown as object,
-        toAddressSnapshot: body.to as unknown as object,
-        serviceLevel: body.service_level,
-        carrier: matched.carrier,
-        costCents: matched.costCents,
-        weightGramsTotal,
-        packagesCount: body.packages.length,
-        packagesSnapshot: body.packages as unknown as object,
-        estimatedDaysMin: matched.estimatedDaysMin,
-        estimatedDaysMax: matched.estimatedDaysMax,
-        idempotencyKey: idempotencyKey ?? null,
-        expiresAt: new Date(Date.now() + QUOTE_TTL_MS),
-      },
-    });
+    const quotes = await prisma.$transaction(
+      result.perOrigin.map((r, idx) =>
+        prisma.shippingQuote.create({
+          data: {
+            id: generateId("qte"),
+            sellerProfileId: r.sellerProfileId,
+            fromAddressSnapshot: pickupsResolved[idx].address as unknown as object,
+            toAddressSnapshot: body.to as unknown as object,
+            serviceLevel: body.service_level,
+            carrier: r.carrier,
+            costCents: r.netCostCents,
+            weightGramsTotal: pickupsResolved[idx].weightGramsTotal,
+            packagesCount: pickupsResolved[idx].packages.length,
+            packagesSnapshot: pickupsResolved[idx].packages as unknown as object,
+            estimatedDaysMin: r.estimatedDaysMin,
+            estimatedDaysMax: r.estimatedDaysMax,
+            idempotencyKey: idempotencyKey ? `${idempotencyKey}:${idx}` : null,
+            expiresAt,
+          },
+        }),
+      ),
+    );
 
-    return NextResponse.json(toShippingQuoteDTO(quote), { status: 201 });
+    return NextResponse.json(
+      toQuoteResponseDTO({
+        quotes,
+        originsCount: result.originsCount,
+        discountPct: result.discountPct,
+        totalGrossCents: result.totalGrossCents,
+        totalNetCents: result.totalNetCents,
+      }),
+      { status: 201 },
+    );
   } catch (err) {
     return handleApiError(err);
   }

@@ -40,7 +40,13 @@ export interface ShipmentDTO {
   buyer_profile_id: string;
   carrier: string;
   service_level: ServiceLevel;
+  /** Tracking individual del pickup (este shipment). Operador/admin lo usan. */
   tracking_number: string;
+  /**
+   * ADR-005: tracking del pedido entero (compartido por todos los shipments
+   * con el mismo order_id). El Buyer expone solo este.
+   */
+  order_tracking_number: string;
   label_url: string;
   status: ShipmentStatus;
   weight_grams_total: number;
@@ -52,6 +58,25 @@ export interface ShipmentDTO {
   delivered_at: string | null;
   created_at: string;
   packages?: PackageDTO[];
+  /**
+   * ADR-005: resumen de TODOS los pickups del mismo `order_id` (incluido
+   * este shipment). Para single-origen `length === 1`. Permite a la UI
+   * renderizar el diagrama de flujo multi-vendedor sin round-trips extra.
+   */
+  order_pickups?: OrderPickupSummary[];
+}
+
+/**
+ * Resumen mínimo de un pickup (1 shipment = 1 vendedor) dentro del pedido.
+ * Usado por el diagrama de flujo del operador y la pantalla pública de
+ * tracking. Excluye datos sensibles para que el mismo type sirva en ambos.
+ */
+export interface OrderPickupSummary {
+  shipment_id: string;
+  tracking_number: string;
+  pickup_city: string;
+  seller_profile_id: string;
+  status: ShipmentStatus;
 }
 
 /** Body de POST /api/v1/shipments (S2S Seller, docs/03 §SH2 create). */

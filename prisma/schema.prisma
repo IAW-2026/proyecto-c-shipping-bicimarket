@@ -191,7 +191,12 @@ model Shipment {
 
   carrier        String
   serviceLevel   ServiceLevel   @map("service_level")
-  trackingNumber String         @unique @map("tracking_number") // "TRK-AR-…"
+  trackingNumber String         @unique @map("tracking_number") // "TRK-AR-…" del pickup individual
+  // ADR-005: tracking del pedido completo. NO es único — todos los Shipment
+  // de un mismo order_id comparten este valor. Se genera la primera vez que
+  // se crea un Shipment para ese order_id; las siguientes reusan el lookup.
+  // Buyer expone solo este; operador/admin ven ambos.
+  orderTrackingNumber String    @map("order_tracking_number")
   labelUrl       String         @map("label_url") // sprint 1: placeholder /public/labels/sample.pdf
   status         ShipmentStatus @default(created)
 
@@ -223,6 +228,7 @@ model Shipment {
   @@index([buyerProfileId])
   @@index([status])
   @@index([createdAt])
+  @@index([orderTrackingNumber])
   @@map("shipments")
 }
 

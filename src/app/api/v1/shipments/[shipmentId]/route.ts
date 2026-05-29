@@ -11,6 +11,11 @@ import { generateId } from "@/lib/ids";
 import { toShipmentDTO } from "@/lib/dto";
 import { patchShipmentStatusSchema } from "@/validation/shipments";
 import { StatusHistorySource } from "@/generated/prisma/client";
+import type { Address } from "@/types/common";
+import type {
+  OrderPickupSummary,
+  ShipmentStatus,
+} from "@/types/shipments";
 import { logger } from "@/lib/logger";
 
 export async function GET(
@@ -35,7 +40,36 @@ export async function GET(
       throw new ApiError("NOT_FOUND", 404, "Shipment inexistente");
     }
 
-    return NextResponse.json(toShipmentDTO(shipment, shipment.packages));
+    // ADR-005: hidratar TODOS los pickups del mismo order_id (incluido este
+    // shipment) para que la UI del operador pueda renderizar el diagrama de
+    // flujo multi-vendedor sin round-trips extra. length===1 si es single.
+    const orderShipments = await prisma.shipment.findMany({
+      where: { orderId: shipment.orderId },
+      select: {
+        id: true,
+        trackingNumber: true,
+        sellerProfileId: true,
+        status: true,
+        pickupAddressSnapshot: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+    });
+
+    const orderPickups: OrderPickupSummary[] = orderShipments.map((s) => {
+      const addr = s.pickupAddressSnapshot as unknown as Address;
+      return {
+        shipment_id: s.id,
+        tracking_number: s.trackingNumber,
+        pickup_city: addr.city,
+        seller_profile_id: s.sellerProfileId,
+        status: s.status as ShipmentStatus,
+      };
+    });
+
+    return NextResponse.json(
+      toShipmentDTO(shipment, shipment.packages, orderPickups),
+    );
   } catch (err) {
     return handleApiError(err);
   }

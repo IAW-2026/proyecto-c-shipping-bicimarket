@@ -106,8 +106,15 @@ export async function POST(
       // sigue como antes (operador continúa con SU envío).
     }
 
-    const event = await prisma.$transaction(async (tx) => {
+    // ADR-005: si la transición es a picked_up, después de avanzar el estado
+    // chequeamos si todos los siblings del mismo order_id ya están en
+    // picked_up o posterior. Si sí, marcamos para emitir un log derivado
+    // (sin persistir estado agregado). Solo aplica a órdenes multi-vendedor.
+    type OrderAllPickedUpInfo = { orderId: string; shipmentIds: string[] };
+
+    const { event, orderAllPickedUpInfo } = await prisma.$transaction(async (tx) => {
       let statusAlreadyAdvanced = false;
+      let pickedUpInfo: OrderAllPickedUpInfo | null = null;
 
       // ── Optimistic concurrency: si auto-asign, intentar avanzar el status
       //    como guard atómico. Solo UN thread va a poder mover el shipment
@@ -184,7 +191,40 @@ export async function POST(
         });
       }
 
-      return ev;
+      // ADR-005: detección de "todos los retiros del order_id están listos".
+      // Solo se evalúa cuando la transición es a picked_up y el order tiene
+      // siblings (>1 shipment). Si todos están picked_up o más adelante,
+      // marcamos para logear un evento agregado fuera de la transacción.
+      if (nextStatus === ShipmentStatus.picked_up) {
+        const siblings = await tx.shipment.findMany({
+          where: { orderId: shipment.orderId },
+          select: { id: true, status: true },
+        });
+        if (siblings.length > 1) {
+          const PICKED_UP_OR_BEYOND = new Set<ShipmentStatus>([
+            ShipmentStatus.picked_up,
+            ShipmentStatus.in_transit,
+            ShipmentStatus.out_for_delivery,
+            ShipmentStatus.delivered,
+          ]);
+          // El shipment actual ya se actualizó arriba (en updateMany o
+          // update). El findMany debería ver el nuevo status, pero por las
+          // dudas lo tratamos como picked_up explícitamente.
+          const allPickedUp = siblings.every((s) =>
+            s.id === shipmentId
+              ? true
+              : PICKED_UP_OR_BEYOND.has(s.status as ShipmentStatus),
+          );
+          if (allPickedUp) {
+            pickedUpInfo = {
+              orderId: shipment.orderId,
+              shipmentIds: siblings.map((s) => s.id),
+            };
+          }
+        }
+      }
+
+      return { event: ev, orderAllPickedUpInfo: pickedUpInfo };
     });
 
     // ─── Sprint 1 (ADR-002): outbound diferido a Buyer y Seller ────────────
@@ -207,6 +247,23 @@ export async function POST(
         payload: {
           shipping_status: nextStatus,
           shipment_id: shipment.id,
+          occurred_at: body.occurred_at,
+        },
+      });
+    }
+
+    // ADR-005: si la última pickup del order_id se acaba de marcar,
+    // emitimos un log derivado (consolidated picked_up). Es informativo
+    // dentro del sprint 1 / ADR-002; en sprint 2 puede convertirse en una
+    // llamada real al Buyer.
+    if (orderAllPickedUpInfo) {
+      logger.outboundDeferred({
+        target: "buyer",
+        method: "POST",
+        path: `/api/v1/orders/${orderAllPickedUpInfo.orderId}/all-shipments-picked-up`,
+        payload: {
+          order_id: orderAllPickedUpInfo.orderId,
+          shipment_ids: orderAllPickedUpInfo.shipmentIds,
           occurred_at: body.occurred_at,
         },
       });

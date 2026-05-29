@@ -75,3 +75,19 @@ Toda transición inválida debe rechazarse con `409 INVALID_TRANSITION`. Esta ta
 | failed_delivery | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ✅ |
 | delivered | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | returned | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+
+---
+
+## 4. Estado agregado del pedido (ADR-005, derivado)
+
+Una orden con N vendedores genera N `Shipment` con el mismo `order_id`. La máquina de estado de arriba sigue siendo **por shipment** — cada uno transiciona independiente. **No** persistimos un "estado del pedido". Sin embargo, cuando se marca el último shipment de un `order_id` como `picked_up` y todos los demás del mismo `order_id` ya están en `picked_up` o más adelante, el handler de tracking-events emite un log derivado:
+
+```
+{ level: "outbound-deferred", target: "buyer", method: "POST",
+  path: "/api/v1/orders/{order_id}/all-shipments-picked-up",
+  payload: { order_id, shipment_ids: [shp_..., shp_...], occurred_at } }
+```
+
+Aplica solo cuando `siblings.length > 1` (pedidos multi-vendedor). Para pedidos single-origen alcanza con los CR2/CR3 individuales — no se emite el log agregado.
+
+> **Sprint 1 (ADR-002)**: este log queda como `outbound-deferred`. En sprint 2 se convierte en una llamada real al Buyer (CR2 consolidado o un endpoint nuevo). La UI del operador (`OrderPickupCard` en `/dashboard/assignments`) usa el mismo razonamiento en el cliente para mostrar la card como "Todos retirados" y habilitar el avance bulk a `in_transit`.

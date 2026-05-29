@@ -1,4 +1,8 @@
-import type { ShipmentStatus, ServiceLevel } from "./shipments";
+import type {
+  ShipmentStatus,
+  ServiceLevel,
+  OrderPickupSummary,
+} from "./shipments";
 import type { TrackingEventType } from "./tracking-events";
 
 /**
@@ -13,7 +17,29 @@ import type { TrackingEventType } from "./tracking-events";
  * pública en el bucket de Supabase.
  */
 export interface PublicTrackingDTO {
+  /**
+   * El código que el usuario buscó (puede ser el TRK individual del pickup o
+   * el TRK del pedido entero). Es el que se muestra como "Código de
+   * seguimiento" en la pantalla.
+   */
   tracking_number: string;
+  /**
+   * ADR-005: TRK del pedido entero (compartido entre N pickups si es
+   * multi-vendedor). Si es distinto del `tracking_number`, significa que el
+   * usuario buscó por el individual y se le informa el del pedido como
+   * contexto.
+   */
+  order_tracking_number: string;
+  /**
+   * Cantidad de pickups del pedido. Para single-origen es 1.
+   * Conveniente para hints como "1 de N envíos".
+   */
+  order_pickups_count: number;
+  /**
+   * Resumen de TODOS los pickups del pedido. Permite renderizar el flow
+   * multi-vendedor en la pantalla pública sin round-trips extra.
+   */
+  order_pickups: OrderPickupSummary[];
   shipment_id: string;
   status: ShipmentStatus;
   carrier: string;

@@ -84,46 +84,84 @@ Owner: Enrique Seitz. Clerk: `shipping.bicimarket`.
 ## SH1. Cotizaciones
 
 ### `POST /api/v1/shipping-quotes`
-Lo llama Buyer App durante el checkout. Una cotización por cada `seller_group`.
+Lo llama Buyer App durante el checkout. **Desde ADR-005** el endpoint acepta siempre `pickups: [...]` (N>=1). Una sola llamada cotiza toda la orden — Buyer ya no llama N veces por `seller_group`. Para `N=1` el descuento es 0; para `N>=2` se aplica `discount = min(0.20, 0.05 × (N - 1))` y se distribuye por tramo.
 
 **Auth**: `X-Service-Token` (S2S desde Buyer).
 
 **Request**
 ```json
 {
-  "from": { "seller_profile_id": "slp_01H…" },
+  "pickups": [
+    {
+      "seller_profile_id": "slp_01H…",
+      "packages": [
+        { "weight_grams": 14500, "length_cm": 180, "width_cm": 60, "height_cm": 110 }
+      ]
+    },
+    {
+      "seller_profile_id": "slp_02H…",
+      "packages": [
+        { "weight_grams": 750, "length_cm": 70, "width_cm": 70, "height_cm": 10 }
+      ]
+    }
+  ],
   "to": {
     "city": "CABA",
     "province": "Buenos Aires",
     "postal_code": "C1043",
     "country": "AR"
   },
-  "packages": [
-    { "weight_grams": 14500, "length_cm": 180, "width_cm": 60, "height_cm": 110 }
-  ],
   "service_level": "standard"
 }
 ```
 `service_level`: `standard` | `express` | `same_day`.
 
-**Response 200**
+**Response 201**
 ```json
 {
-  "id": "qte_01H…",
-  "seller_profile_id": "slp_01H…",
-  "service_level": "standard",
-  "carrier": "andreani",
-  "cost_cents": 1200000,
+  "origins_count": 2,
+  "discount_pct": 0.05,
+  "total_gross_cents": 1800000,
+  "total_net_cents": 1710000,
   "currency": "ARS",
-  "estimated_days_min": 3,
-  "estimated_days_max": 5,
-  "weight_grams_total": 14500,
-  "packages_count": 1,
-  "expires_at": "2026-04-25T15:32:00Z"
+  "quotes": [
+    {
+      "id": "qte_01H…",
+      "seller_profile_id": "slp_01H…",
+      "service_level": "standard",
+      "carrier": "andreani",
+      "cost_cents": 1140000,
+      "currency": "ARS",
+      "estimated_days_min": 3,
+      "estimated_days_max": 5,
+      "weight_grams_total": 14500,
+      "packages_count": 1,
+      "expires_at": "2026-04-25T15:32:00Z"
+    },
+    {
+      "id": "qte_02H…",
+      "seller_profile_id": "slp_02H…",
+      "service_level": "standard",
+      "carrier": "andreani",
+      "cost_cents": 570000,
+      "currency": "ARS",
+      "estimated_days_min": 3,
+      "estimated_days_max": 5,
+      "weight_grams_total": 750,
+      "packages_count": 1,
+      "expires_at": "2026-04-25T15:32:00Z"
+    }
+  ]
 }
 ```
 
-`expires_at` = ahora + 60 minutos. Buyer App debe usar esta `quote_id` al crear la orden, y Shipping valida que no esté vencida cuando se crea el shipment.
+Buyer App usa cada `quote_id` al crear los shipments correspondientes (uno por seller via SH2). Cuando es single-origen, `quotes` tiene un elemento, `discount_pct = 0` y `total_gross_cents === total_net_cents`. `expires_at` = ahora + 60 minutos, compartido entre las N quotes.
+
+**Errores**:
+- `422 POSTAL_CODE_UNKNOWN` con `details: { postal_code }` cuando el destino o un origen no está en el dataset.
+- `422 RATE_NOT_FOUND` con `details: { seller_profile_id, postal_code }` cuando algún origen no matchea una tarifa.
+
+**Idempotencia**: con `Idempotency-Key: K`, las N quotes se persisten con clave `${K}:${idx}` y el endpoint las recupera por prefijo en POST repetidos.
 
 > **Sprint 1 (ADR-002)**: la hidratación de `pickup_address` desde Seller está mockeada en `lib/mocks.ts`. Ver §CR1 para el contrato real.
 

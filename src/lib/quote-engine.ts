@@ -12,6 +12,7 @@ import { ApiError } from "@/lib/api-error";
 import { distanceBetweenPostalCodes } from "@/lib/geo/distance";
 import { geocodePostalCode } from "@/lib/geo/ar-postal-codes";
 import { bestRoute } from "@/lib/geo/route";
+import { multiOriginDiscountFactor } from "@/lib/multi-origin-discount";
 import type { ShippingRate } from "@/generated/prisma/client";
 import type { ServiceLevel } from "@/types/shipments";
 
@@ -173,5 +174,122 @@ export async function quoteMultiPickupRoute(
     estimatedDaysMin: rate.estimatedDaysMin,
     estimatedDaysMax: rate.estimatedDaysMax,
     carrier: rate.carrier,
+  };
+}
+
+// ─── Multi-origin sum (ADR-005) ────────────────────────────────────────────
+// Costeo "suma de tramos" para órdenes multi-vendedor. Por cada origen:
+// `findMatchingRate(origen_i → destino, peso_i, service_level)`. Después se
+// suma todo y se aplica un descuento `min(0.20, 0.05 * (N-1))` proporcional
+// a cada tramo. El último origen absorbe el redondeo para que
+// SUM(netCostCents) === totalNetCents exacto.
+//
+// Reemplaza el costeo viejo de quoteMultiPickupRoute (TSP + un solo rate)
+// que subcotizaba envíos con orígenes dispersos.
+
+export interface MultiOriginPickupInput {
+  sellerProfileId: string;
+  postalCode: string;
+  weightGramsTotal: number;
+}
+
+export interface MultiOriginPerOrigin {
+  sellerProfileId: string;
+  rate: ShippingRate;
+  distanceKm: number;
+  grossCostCents: number;
+  netCostCents: number;
+  estimatedDaysMin: number;
+  estimatedDaysMax: number;
+  carrier: string;
+}
+
+export interface MultiOriginSumResult {
+  perOrigin: MultiOriginPerOrigin[];
+  originsCount: number;
+  discountPct: number;
+  totalGrossCents: number;
+  totalNetCents: number;
+}
+
+export async function quoteMultiOriginSum(input: {
+  pickups: MultiOriginPickupInput[];
+  destinationPostalCode: string;
+  serviceLevel: ServiceLevel;
+}): Promise<MultiOriginSumResult> {
+  if (input.pickups.length === 0) {
+    throw new ApiError(
+      "BAD_REQUEST",
+      400,
+      "Se requiere al menos un pickup para cotizar",
+    );
+  }
+
+  const perOriginRaw = await Promise.all(
+    input.pickups.map(async (pickup) => {
+      const matched = await findMatchingRate({
+        pickupPostalCode: pickup.postalCode,
+        shippingPostalCode: input.destinationPostalCode,
+        weightGramsTotal: pickup.weightGramsTotal,
+        serviceLevel: input.serviceLevel,
+      });
+      if (!matched) {
+        throw new ApiError(
+          "RATE_NOT_FOUND",
+          422,
+          "No hay tarifa disponible para uno de los orígenes",
+          {
+            seller_profile_id: pickup.sellerProfileId,
+            postal_code: pickup.postalCode,
+            weight_grams_total: pickup.weightGramsTotal,
+            service_level: input.serviceLevel,
+          },
+        );
+      }
+      return { pickup, matched };
+    }),
+  );
+
+  const originsCount = perOriginRaw.length;
+  const discountPct = multiOriginDiscountFactor(originsCount);
+  const factor = 1 - discountPct;
+
+  const totalGrossCents = perOriginRaw.reduce(
+    (sum, { matched }) => sum + matched.costCents,
+    0,
+  );
+  const totalNetCents = Math.floor(totalGrossCents * factor);
+
+  // Aplicar descuento por tramo con redondeo absorbido por el último origen
+  // para que SUM(netCostCents) === totalNetCents (mismo patrón que
+  // admin/shipments/route.ts:101-116).
+  let runningNet = 0;
+  const perOrigin: MultiOriginPerOrigin[] = perOriginRaw.map(
+    ({ pickup, matched }, idx) => {
+      const gross = matched.costCents;
+      const isLast = idx === originsCount - 1;
+      const net = isLast
+        ? totalNetCents - runningNet
+        : Math.floor(gross * factor);
+      runningNet += net;
+      return {
+        sellerProfileId: pickup.sellerProfileId,
+        rate: matched.rate,
+        distanceKm: matched.distanceKm,
+        grossCostCents: gross,
+        netCostCents: net,
+        estimatedDaysMin: matched.estimatedDaysMin,
+        estimatedDaysMax: matched.estimatedDaysMax,
+        carrier: matched.carrier,
+      };
+    },
+  );
+
+  return {
+    perOrigin,
+    originsCount,
+    discountPct,
+    totalGrossCents,
+    totalNetCents,
   };
 }

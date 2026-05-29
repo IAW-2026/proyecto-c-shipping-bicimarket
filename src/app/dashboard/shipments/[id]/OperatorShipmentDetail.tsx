@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, RefreshCcw } from "lucide-react";
+import { ChevronLeft, Info, RefreshCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/status/StatusBadge";
@@ -9,6 +9,7 @@ import { ErrorBanner } from "@/components/feedback/ErrorBanner";
 import { AddressCard } from "@/components/shipping/AddressCard";
 import { TrackingTimeline } from "@/components/shipping/TrackingTimeline";
 import { ShipmentRouteMap } from "@/components/shipping/ShipmentRouteMap";
+import { OrderShipmentFlow } from "@/components/shipping/OrderShipmentFlow";
 import { DeliveryProofCard } from "@/components/shipping/DeliveryProofCard";
 import { TransitionButton } from "@/components/operator/TransitionButton";
 import { OperatorStatusBanner } from "@/components/operator/OperatorStatusBanner";
@@ -85,6 +86,12 @@ export function OperatorShipmentDetail({
     shipment.packages?.map((p) => p.description).filter(Boolean).join(", ") ||
     "Paquete sin descripción";
 
+  const orderPickups = shipment.order_pickups ?? [];
+  const isMultiOrigin = orderPickups.length > 1;
+  const hasDistinctOrderTracking =
+    shipment.order_tracking_number &&
+    shipment.order_tracking_number !== shipment.tracking_number;
+
   return (
     <div className="space-y-4 pb-24">
       {/* Header */}
@@ -96,14 +103,44 @@ export function OperatorShipmentDetail({
         >
           <ChevronLeft className="size-4" />
         </Link>
-        <p className="font-mono text-sm font-semibold">
-          {shipment.tracking_number}
-        </p>
+        <div className="min-w-0 flex-1 text-center">
+          <p className="font-mono text-sm font-semibold">
+            {shipment.tracking_number}
+          </p>
+          {hasDistinctOrderTracking && (
+            <p className="font-mono text-[10px] text-muted-foreground">
+              Pedido · {shipment.order_tracking_number}
+            </p>
+          )}
+        </div>
         <StatusBadge status={shipment.status} size="sm" />
       </header>
 
       {/* Banner si el operador está suspended/inactive */}
       <OperatorStatusBanner status={operatorStatus} />
+
+      {/* ADR-005: banner cuando el envío es parte de un pedido multi-vendedor */}
+      {isMultiOrigin && (
+        <div className="flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/10 p-3 text-xs text-foreground">
+          <Info className="mt-0.5 size-4 shrink-0 text-primary" />
+          <div className="space-y-1">
+            <p>
+              Estás viendo el pickup de un vendedor. El pedido completo (
+              <span className="font-mono">
+                {shipment.order_tracking_number}
+              </span>
+              ) tiene <strong>{orderPickups.length}</strong> orígenes.
+            </p>
+            <Link
+              href="/dashboard/assignments"
+              className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+            >
+              Ver pedido completo
+              <ChevronLeft className="size-3 rotate-180" />
+            </Link>
+          </div>
+        </div>
+      )}
 
       {/* Línea secundaria */}
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -127,11 +164,18 @@ export function OperatorShipmentDetail({
         )}
       </div>
 
-      {/* Mapa de ruta del envío */}
-      <ShipmentRouteMap
-        status={shipment.status}
-        caption={
-          (() => {
+      {/* Diagrama de flujo: si es multi-vendedor mostramos el flow consolidado,
+          si no, el ShipmentRouteMap lineal de siempre. */}
+      {isMultiOrigin ? (
+        <OrderShipmentFlow
+          pickups={orderPickups}
+          highlightShipmentId={shipment.id}
+          caption={`Pedido · ${shipment.shipping_address_snapshot.city} · ${orderPickups.length} orígenes`}
+        />
+      ) : (
+        <ShipmentRouteMap
+          status={shipment.status}
+          caption={(() => {
             const km = distanceBetweenPostalCodes(
               shipment.pickup_address_snapshot.postal_code,
               shipment.shipping_address_snapshot.postal_code,
@@ -141,21 +185,22 @@ export function OperatorShipmentDetail({
               : `${shipment.pickup_address_snapshot.city} → ${shipment.shipping_address_snapshot.city}`;
           })()
         }
-        failureAction={
-          shipment.status === "failed_delivery" ? (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleRetry}
-              disabled={actionsBlocked || retry.isPending}
-              className="border-destructive/40 text-destructive hover:bg-destructive/15"
-            >
-              <RefreshCcw className="size-3.5" />
-              {retry.isPending ? "Creando…" : "Crear nuevo envío"}
-            </Button>
-          ) : null
-        }
-      />
+          failureAction={
+            shipment.status === "failed_delivery" ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleRetry}
+                disabled={actionsBlocked || retry.isPending}
+                className="border-destructive/40 text-destructive hover:bg-destructive/15"
+              >
+                <RefreshCcw className="size-3.5" />
+                {retry.isPending ? "Creando…" : "Crear nuevo envío"}
+              </Button>
+            ) : null
+          }
+        />
+      )}
 
       {/* Direcciones */}
       <div className="space-y-3">

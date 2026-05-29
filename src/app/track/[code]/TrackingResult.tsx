@@ -13,6 +13,7 @@ import { ErrorBanner } from "@/components/feedback/ErrorBanner";
 import { EmptyState } from "@/components/feedback/EmptyState";
 import { StatusBadge } from "@/components/status/StatusBadge";
 import { ShipmentRouteMap } from "@/components/shipping/ShipmentRouteMap";
+import { OrderShipmentFlow } from "@/components/shipping/OrderShipmentFlow";
 import { TrackingTimeline } from "@/components/shipping/TrackingTimeline";
 import { useTracking } from "@/hooks/querys/track/useTracking";
 import { distanceBetweenPostalCodes } from "@/lib/geo/distance";
@@ -108,20 +109,51 @@ export function TrackingResult({ code }: TrackingResultProps) {
             <h1 className="font-mono text-2xl font-semibold tracking-tight sm:text-3xl">
               {data.tracking_number}
             </h1>
+            {/* ADR-005: contexto multi-vendedor — el comprador puede haber
+                buscado por el TRK del pedido (varios pickups) o por el TRK
+                individual (uno de los pickups). Le mostramos el otro como
+                referencia. */}
+            {data.order_tracking_number !== data.tracking_number && (
+              <p className="font-mono text-[11px] text-muted-foreground">
+                Forma parte del pedido{" "}
+                <span className="text-foreground">
+                  {data.order_tracking_number}
+                </span>
+              </p>
+            )}
+            {data.order_pickups_count > 1 &&
+              data.order_tracking_number === data.tracking_number && (
+                <p className="text-[11px] text-muted-foreground">
+                  Pedido con{" "}
+                  <strong className="text-foreground">
+                    {data.order_pickups_count} envíos
+                  </strong>{" "}
+                  (uno por vendedor). Estás viendo el más temprano.
+                </p>
+              )}
           </div>
           <StatusBadge status={data.status} />
         </div>
       </header>
 
-      {/* Mapa de ruta */}
-      <ShipmentRouteMap
-        status={data.status}
-        caption={
-          km != null
-            ? `≈ ${km} km · ${data.origin.city} → ${data.destination.city}`
-            : `${data.origin.city} → ${data.destination.city}`
-        }
-      />
+      {/* Diagrama del flujo: si es multi-vendedor mostramos el flow consolidado;
+          si no, el ShipmentRouteMap lineal. */}
+      {data.order_pickups && data.order_pickups.length > 1 ? (
+        <OrderShipmentFlow
+          pickups={data.order_pickups}
+          highlightShipmentId={data.shipment_id}
+          caption={`${data.order_pickups.length} orígenes → ${data.destination.city}`}
+        />
+      ) : (
+        <ShipmentRouteMap
+          status={data.status}
+          caption={
+            km != null
+              ? `≈ ${km} km · ${data.origin.city} → ${data.destination.city}`
+              : `${data.origin.city} → ${data.destination.city}`
+          }
+        />
+      )}
 
       {/* Resumen + acciones de print */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">

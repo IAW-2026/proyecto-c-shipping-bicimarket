@@ -90,6 +90,8 @@ export function DeliveryHistory() {
 
 function DeliveryCard({ delivery }: { delivery: MyDeliveryDTO }) {
   const addr = delivery.shipping_address;
+  const isPartOfMultiOrigin =
+    delivery.order_tracking_number !== delivery.tracking_number;
   return (
     <Link
       href={`/dashboard/shipments/${delivery.shipment_id}`}
@@ -108,6 +110,12 @@ function DeliveryCard({ delivery }: { delivery: MyDeliveryDTO }) {
             {formatDateShort(delivery.delivered_at)}
           </span>
         </div>
+
+        {isPartOfMultiOrigin && (
+          <p className="font-mono text-[10px] text-muted-foreground">
+            Pedido · {delivery.order_tracking_number}
+          </p>
+        )}
 
         <p className="truncate text-xs text-muted-foreground">
           {addr.street} {addr.number}

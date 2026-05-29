@@ -44,10 +44,11 @@ export default async function ShipmentsAdminPage({
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 className="font-heading text-2xl font-semibold tracking-tight">
-            Envíos
+            Pedidos
           </h2>
           <p className="text-sm text-muted-foreground">
-            Todos los envíos del marketplace
+            Cada pedido agrupa los envíos de sus vendedores. Click para ver
+            cada envío individual.
           </p>
         </div>
         <Link
@@ -58,7 +59,7 @@ export default async function ShipmentsAdminPage({
         </Link>
       </div>
 
-      <Suspense fallback={<TableSkeleton rows={20} columns={7} />}>
+      <Suspense fallback={<TableSkeleton rows={20} columns={8} />}>
         <ShipmentsTable />
       </Suspense>
     </div>

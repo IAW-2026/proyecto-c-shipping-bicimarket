@@ -7,8 +7,10 @@ import { EmptyState } from "@/components/feedback/EmptyState";
 import { ErrorBanner } from "@/components/feedback/ErrorBanner";
 import { ShipmentMobileCard } from "@/components/operator/ShipmentMobileCard";
 import { TransitionButton } from "@/components/operator/TransitionButton";
+import { OrderPickupCard } from "@/components/operator/OrderPickupCard";
 import { OperatorStatusBanner } from "@/components/operator/OperatorStatusBanner";
 import { useMyAssignments } from "@/hooks/querys/assignments/useMyAssignments";
+import { groupAssignmentsByOrder } from "@/lib/group-assignments";
 import { cn } from "@/lib/utils";
 import type { AssignmentDTO } from "@/types/assignments";
 import type { ShipmentStatus } from "@/types/shipments";
@@ -65,6 +67,11 @@ export function MyAssignmentsClient({
     if (!allowed) return all;
     return all.filter((a) => allowed.includes(a.status));
   }, [all, tab]);
+
+  // Agrupar por order_id (ADR-005). Pedidos multi-vendedor (siblings>1) se
+  // renderizan con OrderPickupCard, single-origen se mantiene en
+  // ShipmentMobileCard como antes.
+  const groups = useMemo(() => groupAssignmentsByOrder(filtered), [filtered]);
 
   const totalActive = all.length;
   const greeting = greetingFor(new Date());
@@ -153,9 +160,16 @@ export function MyAssignmentsClient({
         />
       ) : (
         <ul className="space-y-3">
-          {filtered.map((a) => (
-            <li key={a.id}>
-              <AssignmentItem assignment={a} disabled={actionsBlocked} />
+          {groups.map((g) => (
+            <li key={g.orderId}>
+              {g.isMultiOrigin ? (
+                <OrderPickupCard group={g} disabled={actionsBlocked} />
+              ) : (
+                <AssignmentItem
+                  assignment={g.assignments[0]}
+                  disabled={actionsBlocked}
+                />
+              )}
             </li>
           ))}
         </ul>

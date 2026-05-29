@@ -1,14 +1,14 @@
 "use client";
 import { PackageOpen, PackageSearch, SearchX } from "lucide-react";
 import { useUrlParams } from "@/hooks/useUrlParams";
-import { useShipmentsAdmin } from "@/hooks/querys/shipments/useShipmentsAdmin";
+import { useShipmentGroupsAdmin } from "@/hooks/querys/shipments/useShipmentGroupsAdmin";
 import { useShipmentsKpis } from "@/hooks/querys/shipments/useShipmentsKpis";
 import { DataTable } from "@/components/data-table/DataTable";
 import { KpiCard } from "@/components/admin/KpiCard";
 import { EmptyState } from "@/components/feedback/EmptyState";
 import { ErrorBanner } from "@/components/feedback/ErrorBanner";
 import { Skeleton } from "@/components/ui/skeleton";
-import { columnsShipments } from "./columns";
+import { columnsShipmentGroups } from "./columns";
 import { filterConfigsShipments } from "./filtersConfig";
 import type {
   ShipmentStatus,
@@ -45,7 +45,7 @@ export function ShipmentsTable() {
     isLoading,
     isError,
     refetch,
-  } = useShipmentsAdmin(filters, page, perPage, sortBy, sortDir);
+  } = useShipmentGroupsAdmin(filters, page, perPage, sortBy, sortDir);
 
   const { data: kpis, isLoading: kpisLoading } = useShipmentsKpis();
 
@@ -132,7 +132,7 @@ export function ShipmentsTable() {
       ) : (
         <DataTable
           data={rows}
-          columns={columnsShipments}
+          columns={columnsShipmentGroups}
           filters={filterConfigsShipments}
           pagination={
             data?.pagination ?? {
@@ -155,7 +155,7 @@ export function ShipmentsTable() {
       {!isLoading && rows.length > 0 && rows.length < 5 && (
         <p className="text-center text-xs text-muted-foreground">
           <PackageSearch className="-mt-0.5 mr-1 inline size-3.5" />
-          Sólo {rows.length} envíos visibles · revisá filtros activos.
+          Sólo {rows.length} pedidos visibles · revisá filtros activos.
         </p>
       )}
     </div>
