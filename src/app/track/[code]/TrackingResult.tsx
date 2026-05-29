@@ -98,39 +98,49 @@ export function TrackingResult({ code }: TrackingResultProps) {
           className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground print:hidden"
         >
           <ArrowLeft className="size-3.5" />
-          Buscar otro envío
+          Buscar otro pedido
         </Link>
 
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div className="space-y-1">
             <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Código de seguimiento
+              {data.order_tracking_number === data.tracking_number
+                ? "Seguimiento del pedido"
+                : "Seguimiento del envío"}
             </p>
             <h1 className="font-mono text-2xl font-semibold tracking-tight sm:text-3xl">
               {data.tracking_number}
             </h1>
-            {/* ADR-005: contexto multi-vendedor — el comprador puede haber
-                buscado por el TRK del pedido (varios pickups) o por el TRK
-                individual (uno de los pickups). Le mostramos el otro como
-                referencia. */}
-            {data.order_tracking_number !== data.tracking_number && (
+            {/* ADR-006: el comprador sigue su pedido por el código global
+                (BMK-…). Puede haber buscado por ese, o por el de un envío
+                individual de un vendedor (TRK-AR-…). Tres casos: */}
+            {data.order_tracking_number !== data.tracking_number ? (
+              // Buscó por un envío individual → le mostramos el pedido completo.
               <p className="font-mono text-[11px] text-muted-foreground">
-                Forma parte del pedido{" "}
+                Es un envío de tu pedido{" "}
                 <span className="text-foreground">
                   {data.order_tracking_number}
                 </span>
+                {data.order_pickups_count > 1 && (
+                  <span className="font-sans">
+                    {" "}
+                    · {data.order_pickups_count} envíos en total
+                  </span>
+                )}
               </p>
-            )}
-            {data.order_pickups_count > 1 &&
-              data.order_tracking_number === data.tracking_number && (
+            ) : (
+              data.order_pickups_count > 1 && (
+                // Buscó por el global → ve el pedido consolidado completo.
                 <p className="text-[11px] text-muted-foreground">
-                  Pedido con{" "}
+                  Tu pedido tiene{" "}
                   <strong className="text-foreground">
                     {data.order_pickups_count} envíos
                   </strong>{" "}
-                  (uno por vendedor). Estás viendo el más temprano.
+                  (uno por vendedor). Abajo ves cada uno y el progreso
+                  consolidado.
                 </p>
-              )}
+              )
+            )}
           </div>
           <StatusBadge status={data.status} />
         </div>
@@ -142,7 +152,7 @@ export function TrackingResult({ code }: TrackingResultProps) {
         <OrderShipmentFlow
           pickups={data.order_pickups}
           highlightShipmentId={data.shipment_id}
-          caption={`${data.order_pickups.length} orígenes → ${data.destination.city}`}
+          caption={`${data.order_pickups.length} vendedores → ${data.destination.city}`}
         />
       ) : (
         <ShipmentRouteMap

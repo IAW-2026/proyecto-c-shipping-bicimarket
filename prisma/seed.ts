@@ -61,6 +61,37 @@ function generateTrackingNumber(): string {
   return `TRK-AR-${digits}`;
 }
 
+function generateGroupTrackingNumber(): string {
+  const digits = Math.floor(1_000_000_000 + Math.random() * 9_000_000_000);
+  return `BMK-${digits}`;
+}
+
+// Rollup del estado del pedido a partir de los estados de sus N shipments.
+// Espejo de src/lib/shipment-rollup.ts (el seed no importa de src/lib).
+const STATUS_ORDER: Record<ShipmentStatus, number> = {
+  created: 0,
+  ready_for_pickup: 1,
+  picked_up: 2,
+  in_transit: 3,
+  out_for_delivery: 4,
+  delivered: 5,
+  failed_delivery: 6,
+  returned: 7,
+};
+function rollupStatus(statuses: ShipmentStatus[]): ShipmentStatus {
+  if (statuses.length === 0) return ShipmentStatus.created;
+  if (statuses.every((s) => s === ShipmentStatus.delivered))
+    return ShipmentStatus.delivered;
+  if (statuses.some((s) => s === ShipmentStatus.failed_delivery))
+    return ShipmentStatus.failed_delivery;
+  if (statuses.some((s) => s === ShipmentStatus.returned))
+    return ShipmentStatus.returned;
+  return statuses.reduce(
+    (least, s) => (STATUS_ORDER[s] < STATUS_ORDER[least] ? s : least),
+    statuses[0],
+  );
+}
+
 function daysAgo(d: number): Date {
   return new Date(Date.now() - d * 24 * 60 * 60 * 1000);
 }
@@ -522,19 +553,47 @@ const STATUS_TO_EVENT: Record<ShipmentStatus, TrackingEventType | null> = {
 
 // ── Lógica del seed ───────────────────────────────────────────────────────
 
+// Estado final por pickup (MULTI_PARCIAL: el primero queda ready_for_pickup).
+function pickupFinalStatusFor(spec: ScenarioSpec, i: number): ShipmentStatus {
+  if (spec.label === "MULTI_PARCIAL" && i === 0) {
+    return ShipmentStatus.ready_for_pickup;
+  }
+  return spec.finalStatus;
+}
+
 async function seedScenario(spec: ScenarioSpec) {
   const orderId = generateId("ord");
-  const orderTrackingNumber = generateTrackingNumber();
   const baseDate = hoursAgo(spec.createdHoursAgo);
+
+  // ADR-006: un ShipmentGroup por pedido, dueño del tracking GLOBAL ("BMK-…")
+  // y del estado consolidado (rollup persistido). La asignación del operador
+  // vive a nivel grupo (un operador toma el pedido entero).
+  const groupId = generateId("grp");
+  const pickupStatuses = spec.pickups.map((_, i) => pickupFinalStatusFor(spec, i));
+  const groupStatus = rollupStatus(pickupStatuses);
+
+  await prisma.shipmentGroup.create({
+    data: {
+      id: groupId,
+      orderId,
+      buyerProfileId: spec.buyerProfileId,
+      trackingNumber: generateGroupTrackingNumber(),
+      status: groupStatus,
+      serviceLevel: spec.serviceLevel,
+      shippingAddressSnapshot: spec.shippingAddress as unknown as object,
+      originsCount: spec.pickups.length,
+      assignedOperatorClerkUserId: spec.assignedToClerkUserId,
+      createdAt: baseDate,
+      updatedAt: baseDate,
+    },
+  });
+
+  // Para crear la asignación a nivel grupo después del loop.
+  let latestDeliveredAt: Date | null = null;
 
   for (let i = 0; i < spec.pickups.length; i++) {
     const pickup = spec.pickups[i];
-    // Para MULTI_PARCIAL: primer pickup queda en ready_for_pickup, los demás
-    // pasan a picked_up. Para el resto: todos llegan a finalStatus.
-    let pickupFinalStatus = spec.finalStatus;
-    if (spec.label === "MULTI_PARCIAL" && i === 0) {
-      pickupFinalStatus = ShipmentStatus.ready_for_pickup;
-    }
+    const pickupFinalStatus = pickupFinalStatusFor(spec, i);
 
     const shipmentId = generateId("shp");
     const quoteId = generateId("qte");
@@ -588,11 +647,11 @@ async function seedScenario(spec: ScenarioSpec) {
         salesOrderId,
         sellerProfileId: pickup.sellerProfileId,
         buyerProfileId: spec.buyerProfileId,
+        shipmentGroupId: groupId,
         shippingQuoteId: quoteId,
         carrier: "andreani",
         serviceLevel: spec.serviceLevel,
         trackingNumber,
-        orderTrackingNumber,
         labelUrl: "/labels/sample.pdf",
         status: pickupFinalStatus,
         weightGramsTotal: weightTotal,
@@ -689,28 +748,8 @@ async function seedScenario(spec: ScenarioSpec) {
     });
     await prisma.shipmentStatusHistory.createMany({ data: histRows });
 
-    // Assignment si corresponde
-    if (
-      spec.assignedToClerkUserId &&
-      pickupFinalStatus !== ShipmentStatus.ready_for_pickup
-    ) {
-      // Status del assignment depende de si el shipment está delivered.
-      const assignmentStatus =
-        pickupFinalStatus === ShipmentStatus.delivered
-          ? AssignmentStatus.delivered
-          : AssignmentStatus.picked_up;
-      await prisma.deliveryAssignment.create({
-        data: {
-          id: generateId("dla"),
-          shipmentId,
-          operatorClerkUserId: spec.assignedToClerkUserId,
-          status: assignmentStatus,
-          assignedAt: new Date(createdAt.getTime() + 30 * 60 * 1000),
-          completedAt: deliveredAt,
-          createdAt: new Date(createdAt.getTime() + 30 * 60 * 1000),
-          updatedAt: deliveredAt ?? new Date(),
-        },
-      });
+    if (deliveredAt && (!latestDeliveredAt || deliveredAt > latestDeliveredAt)) {
+      latestDeliveredAt = deliveredAt;
     }
 
     // Delivery proof si está delivered
@@ -731,6 +770,28 @@ async function seedScenario(spec: ScenarioSpec) {
       });
     }
   }
+
+  // ADR-006: una sola asignación a nivel GRUPO (el operador toma el pedido
+  // entero). Se crea cuando el pedido tiene operador (ej. MULTI_PARCIAL: Juan
+  // ya retiró 2 de 3, aunque el rollup siga en ready_for_pickup).
+  if (spec.assignedToClerkUserId) {
+    const assignmentStatus =
+      groupStatus === ShipmentStatus.delivered
+        ? AssignmentStatus.delivered
+        : AssignmentStatus.picked_up;
+    await prisma.deliveryAssignment.create({
+      data: {
+        id: generateId("dla"),
+        shipmentGroupId: groupId,
+        operatorClerkUserId: spec.assignedToClerkUserId,
+        status: assignmentStatus,
+        assignedAt: new Date(baseDate.getTime() + 30 * 60 * 1000),
+        completedAt: latestDeliveredAt,
+        createdAt: new Date(baseDate.getTime() + 30 * 60 * 1000),
+        updatedAt: latestDeliveredAt ?? new Date(),
+      },
+    });
+  }
 }
 
 async function main() {
@@ -738,7 +799,10 @@ async function main() {
 
   // ── Limpieza ───────────────────────────────────────────────────────────
   console.log("→ Limpiando datos previos...");
-  // Cascade desde Shipment elimina packages, events, assignments, proofs y history.
+  // Cascade desde ShipmentGroup elimina shipments (y desde ahí packages,
+  // events, proofs, history) + assignments por grupo. Borramos shipments
+  // sueltos por las dudas (no debería quedar ninguno sin grupo).
+  await prisma.shipmentGroup.deleteMany({});
   await prisma.shipment.deleteMany({});
   await prisma.shippingQuote.deleteMany({});
   await prisma.logisticsOperator.deleteMany({});

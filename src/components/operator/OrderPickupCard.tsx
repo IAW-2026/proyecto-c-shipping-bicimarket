@@ -108,6 +108,13 @@ export function OrderPickupCard({
           </span>
         </header>
 
+        {someAvailable && !group.allPickedUp && (
+          <p className="rounded-md border border-primary/20 bg-primary/5 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+            Al retirar el primer origen tomás el pedido completo (todos los
+            vendedores). Otro operador ya no podrá tomarlo.
+          </p>
+        )}
+
         <AddressCard
           variant="delivery"
           address={group.shippingAddress}

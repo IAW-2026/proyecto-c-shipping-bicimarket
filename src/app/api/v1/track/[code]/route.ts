@@ -1,10 +1,13 @@
 // GET /api/v1/track/{code} — PÚBLICO (sin auth)
 // Devuelve el tracking de un envío para que cualquiera pueda consultarlo
-// desde la pantalla /track/[code]. El `code` puede ser:
-//   - El shipment_id completo (`shp_...`)
-//   - El tracking_number del pickup individual (`TRK-AR-XXXXXXXX`)
-//   - El order_tracking_number del pedido completo (`TRK-AR-XXXXXXXX`)
-//     (ADR-005: Buyer expone solo este; comparte tracking entre N shipments).
+// desde la pantalla /track/[code]. El `code` puede ser (ADR-006):
+//   - El tracking GLOBAL del pedido (`BMK-XXXXXXXXXX`) o el group_id (`grp_...`)
+//     → es el que ve el comprador; resuelve el pedido completo.
+//   - El tracking individual de un vendedor (`TRK-AR-XXXXXXXX`) o el
+//     shipment_id (`shp_...`) → resuelve ese envío puntual.
+//
+// En ambos casos devolvemos el tracking global del pedido + el resumen de
+// todos sus pickups (order_pickups) para renderizar el flow multi-vendedor.
 //
 // Está pensado para ser shareable: el comprador recibe un link y lo abre
 // sin estar logueado. Por eso omite datos sensibles del DTO (ver
@@ -34,25 +37,39 @@ export async function GET(
       throw new ApiError("BAD_REQUEST", 400, "Código requerido");
     }
 
-    // Match por id exacto, tracking_number individual u order_tracking_number
-    // (case-insensitive). El comprador típicamente recibe el order_tracking,
-    // que puede mapear a N shipments del mismo pedido — devolvemos el más
-    // temprano de esos como representante (la versión multi-vendedor del
-    // tracking público es follow-up de ADR-005).
+    // ADR-006: el código global del pedido es "BMK-…" (o el group_id "grp_…").
+    // Si es global, resolvemos el grupo y mostramos su pickup más temprano como
+    // representante. Si es individual ("TRK-AR-…" o "shp_…"), resolvemos ese
+    // envío. En ambos casos el order_tracking_number sale del grupo.
     const upper = trimmed.toUpperCase();
+    const isGroupCode = upper.startsWith("BMK-") || trimmed.startsWith("grp_");
+
+    let shipmentGroupId: string | null = null;
+    if (isGroupCode) {
+      const group = await prisma.shipmentGroup.findFirst({
+        where: { OR: [{ id: trimmed }, { trackingNumber: upper }] },
+        select: { id: true },
+      });
+      if (!group) {
+        throw new ApiError(
+          "TRACKING_NOT_FOUND",
+          404,
+          "No encontramos un envío con ese código",
+        );
+      }
+      shipmentGroupId = group.id;
+    }
+
     const shipment = await prisma.shipment.findFirst({
-      where: {
-        OR: [
-          { id: trimmed },
-          { trackingNumber: upper },
-          { orderTrackingNumber: upper },
-        ],
-      },
+      where: shipmentGroupId
+        ? { shipmentGroupId }
+        : { OR: [{ id: trimmed }, { trackingNumber: upper }] },
       orderBy: { createdAt: "asc" },
       include: {
         packages: { select: { id: true } },
         trackingEvents: { orderBy: { occurredAt: "asc" } },
         deliveryProof: true,
+        group: { select: { trackingNumber: true } },
       },
     });
 
@@ -75,19 +92,18 @@ export async function GET(
       postal_code: string;
     };
 
-    // Si el código entrante era el order_tracking_number, ese es el que el
-    // comprador vio y espera ver de vuelta. Si era el tracking individual,
-    // devolvemos ese. Si era el shipment_id o no lo sabemos, defaulteamos al
-    // tracking del pedido (más amigable para el comprador).
-    const matchedByIndividual = shipment.trackingNumber === upper;
+    // Tracking a devolver como "principal": si el código era el individual de
+    // un vendedor, ese; si era el global (BMK-/grp_) o el shipment_id,
+    // devolvemos el global del pedido (más amigable para el comprador).
+    const matchedByIndividual = !isGroupCode && shipment.trackingNumber === upper;
     const trackingToReturn = matchedByIndividual
       ? shipment.trackingNumber
-      : shipment.orderTrackingNumber;
+      : shipment.group.trackingNumber;
 
-    // ADR-005: hidratamos TODOS los pickups del pedido para que la UI pueda
-    // renderizar el flow multi-vendedor sin round-trips extra.
+    // ADR-006: hidratamos TODOS los pickups del pedido (mismo grupo) para que
+    // la UI pueda renderizar el flow multi-vendedor sin round-trips extra.
     const orderShipments = await prisma.shipment.findMany({
-      where: { orderId: shipment.orderId },
+      where: { shipmentGroupId: shipment.shipmentGroupId },
       select: {
         id: true,
         trackingNumber: true,
@@ -112,7 +128,7 @@ export async function GET(
 
     const dto: PublicTrackingDTO = {
       tracking_number: trackingToReturn,
-      order_tracking_number: shipment.orderTrackingNumber,
+      order_tracking_number: shipment.group.trackingNumber,
       order_pickups_count: orderPickups.length,
       order_pickups: orderPickups,
       shipment_id: shipment.id,

@@ -34,12 +34,7 @@ import {
   TrackingEventType,
 } from "@/generated/prisma/client";
 import { logger } from "@/lib/logger";
-
-const ACTIVE_ASSIGNMENT_STATUSES = [
-  AssignmentStatus.assigned,
-  AssignmentStatus.accepted,
-  AssignmentStatus.picked_up,
-];
+import { recomputeGroupStatus } from "@/lib/group-status";
 
 export async function POST(
   req: NextRequest,
@@ -67,9 +62,12 @@ export async function POST(
     const shipment = await prisma.shipment.findUnique({
       where: { id: shipmentId },
       include: {
-        assignments: {
-          where: { status: { in: ACTIVE_ASSIGNMENT_STATUSES } },
-          select: { id: true, operatorClerkUserId: true },
+        group: {
+          select: {
+            id: true,
+            trackingNumber: true,
+            assignedOperatorClerkUserId: true,
+          },
         },
       },
     });
@@ -80,75 +78,95 @@ export async function POST(
       assertTransition(shipment.status as ShipmentStatus, nextStatus);
     }
 
-    // ── Auto-asignación cuando el operador toma un envío disponible ──────
-    // Solo aplica si es un operador logueado (no S2S), event_type=picked_up
-    // y el shipment está en ready_for_pickup.
-    let shouldAutoAssign = false;
+    // ── Asignación a nivel GRUPO (ADR-006) ───────────────────────────────
+    // El operador toma el PEDIDO entero. Cuando hace picked_up sobre un envío
+    // de un pedido que nadie tomó, queda dueño del grupo completo. Si el grupo
+    // ya lo tiene OTRO operador → 409. Si lo tiene él, sigue trabajándolo (y
+    // solo avanza el status del pickup, sin crear otra asignación).
+    let shouldClaimGroup = false;
     if (
       operatorClerkUserId &&
       body.event_type === TrackingEventType.picked_up &&
       shipment.status === ShipmentStatus.ready_for_pickup
     ) {
-      const activeAssignment = shipment.assignments[0];
-      if (!activeAssignment) {
-        // Disponible — lo auto-asignamos.
-        shouldAutoAssign = true;
-      } else if (activeAssignment.operatorClerkUserId !== operatorClerkUserId) {
-        // Ya lo tiene otro operador — no podés agarrarlo.
+      const ownerId = shipment.group.assignedOperatorClerkUserId;
+      if (!ownerId) {
+        shouldClaimGroup = true;
+      } else if (ownerId !== operatorClerkUserId) {
         throw new ApiError(
           "SHIPMENT_ALREADY_ASSIGNED",
           409,
-          "Este envío ya fue tomado por otro operador",
-          { existing_operator_clerk_user_id: activeAssignment.operatorClerkUserId },
+          "Este pedido ya fue tomado por otro operador",
+          { existing_operator_clerk_user_id: ownerId },
         );
       }
-      // Si activeAssignment.operatorClerkUserId === operatorClerkUserId,
-      // sigue como antes (operador continúa con SU envío).
     }
 
-    // ADR-005: si la transición es a picked_up, después de avanzar el estado
-    // chequeamos si todos los siblings del mismo order_id ya están en
-    // picked_up o posterior. Si sí, marcamos para emitir un log derivado
-    // (sin persistir estado agregado). Solo aplica a órdenes multi-vendedor.
+    // ADR-006: si la transición es a picked_up, después de avanzar el estado
+    // chequeamos si todos los pickups del grupo ya están en picked_up o más
+    // adelante. Si sí, marcamos para emitir el log derivado (CR2). Solo aplica
+    // a pedidos multi-vendedor.
     type OrderAllPickedUpInfo = { orderId: string; shipmentIds: string[] };
 
     const { event, orderAllPickedUpInfo } = await prisma.$transaction(async (tx) => {
-      let statusAlreadyAdvanced = false;
       let pickedUpInfo: OrderAllPickedUpInfo | null = null;
 
-      // ── Optimistic concurrency: si auto-asign, intentar avanzar el status
-      //    como guard atómico. Solo UN thread va a poder mover el shipment
-      //    de ready_for_pickup → picked_up. Si dos operadores tocan "Ir a
-      //    retirar" al mismo tiempo, el segundo ve count===0 y recibe 409
-      //    en vez de crear un assignment fantasma.
-      //    `updateMany` no requiere row-level lock — Postgres garantiza
-      //    atomicidad por fila a nivel del WHERE.
-      if (shouldAutoAssign && operatorClerkUserId && nextStatus) {
-        const guard = await tx.shipment.updateMany({
+      // ── 1. Claim del grupo (race-safe) ────────────────────────────────
+      //    Solo UN operador puede pasar assignedOperatorClerkUserId de null
+      //    a sí mismo. `updateMany` con el WHERE en null garantiza atomicidad
+      //    por fila sin lock explícito. El segundo operador ve count===0.
+      if (shouldClaimGroup && operatorClerkUserId) {
+        const groupGuard = await tx.shipmentGroup.updateMany({
           where: {
-            id: shipmentId,
-            status: ShipmentStatus.ready_for_pickup,
+            id: shipment.shipmentGroupId,
+            assignedOperatorClerkUserId: null,
           },
-          data: { status: nextStatus },
+          data: { assignedOperatorClerkUserId: operatorClerkUserId },
         });
-        if (guard.count === 0) {
-          // Alguien más se adelantó entre el read y el write.
+        if (groupGuard.count === 0) {
           throw new ApiError(
             "SHIPMENT_ALREADY_ASSIGNED",
             409,
-            "Otro operador acaba de tomar este envío. Refrescá la lista.",
+            "Otro operador acaba de tomar este pedido. Refrescá la lista.",
           );
         }
-        // Ganamos la carrera — creamos el assignment.
+        // Ganamos la carrera — una sola asignación a nivel grupo.
         await tx.deliveryAssignment.create({
           data: {
             id: generateId("dla"),
-            shipmentId,
+            shipmentGroupId: shipment.shipmentGroupId,
             operatorClerkUserId,
             status: AssignmentStatus.picked_up,
           },
         });
-        statusAlreadyAdvanced = true;
+      }
+
+      // ── 2. Avance del status del pickup ───────────────────────────────
+      //    Para ready_for_pickup → picked_up usamos guard atómico (protege
+      //    el doble evento sobre el MISMO pickup). El resto de transiciones
+      //    solo las alcanza el operador dueño del grupo, sin race.
+      if (nextStatus && nextStatus !== shipment.status) {
+        if (
+          shipment.status === ShipmentStatus.ready_for_pickup &&
+          nextStatus === ShipmentStatus.picked_up
+        ) {
+          const guard = await tx.shipment.updateMany({
+            where: { id: shipmentId, status: ShipmentStatus.ready_for_pickup },
+            data: { status: nextStatus },
+          });
+          if (guard.count === 0) {
+            throw new ApiError(
+              "SHIPMENT_ALREADY_ASSIGNED",
+              409,
+              "Este envío acaba de actualizarse. Refrescá la lista.",
+            );
+          }
+        } else {
+          await tx.shipment.update({
+            where: { id: shipmentId },
+            data: { status: nextStatus },
+          });
+        }
       }
 
       const ev = await tx.trackingEvent.create({
@@ -162,22 +180,7 @@ export async function POST(
         },
       });
 
-      // Path normal: avance de status para flujos que NO son auto-asign.
-      // (Ej: picked_up → in_transit → out_for_delivery; sin race porque
-      //  solo el operador con assignment activo puede llegar acá.)
-      if (
-        nextStatus &&
-        nextStatus !== shipment.status &&
-        !statusAlreadyAdvanced
-      ) {
-        await tx.shipment.update({
-          where: { id: shipmentId },
-          data: { status: nextStatus },
-        });
-      }
-
-      // Audit history siempre que hubo cambio de status (sea por auto-asign
-      // o por transición normal).
+      // Audit history siempre que hubo cambio de status.
       if (nextStatus && nextStatus !== shipment.status) {
         await tx.shipmentStatusHistory.create({
           data: {
@@ -189,15 +192,15 @@ export async function POST(
             occurredAt: new Date(body.occurred_at),
           },
         });
+
+        // ADR-006: recomputar y persistir el rollup del pedido.
+        await recomputeGroupStatus(tx, shipment.shipmentGroupId);
       }
 
-      // ADR-005: detección de "todos los retiros del order_id están listos".
-      // Solo se evalúa cuando la transición es a picked_up y el order tiene
-      // siblings (>1 shipment). Si todos están picked_up o más adelante,
-      // marcamos para logear un evento agregado fuera de la transacción.
+      // ADR-006: detección de "todos los pickups del pedido están listos".
       if (nextStatus === ShipmentStatus.picked_up) {
         const siblings = await tx.shipment.findMany({
-          where: { orderId: shipment.orderId },
+          where: { shipmentGroupId: shipment.shipmentGroupId },
           select: { id: true, status: true },
         });
         if (siblings.length > 1) {
@@ -207,9 +210,6 @@ export async function POST(
             ShipmentStatus.out_for_delivery,
             ShipmentStatus.delivered,
           ]);
-          // El shipment actual ya se actualizó arriba (en updateMany o
-          // update). El findMany debería ver el nuevo status, pero por las
-          // dudas lo tratamos como picked_up explícitamente.
           const allPickedUp = siblings.every((s) =>
             s.id === shipmentId
               ? true
@@ -236,7 +236,8 @@ export async function POST(
         payload: {
           shipping_status: nextStatus,
           shipment_id: shipment.id,
-          tracking_number: shipment.trackingNumber,
+          // ADR-006: el comprador sigue el pedido por el tracking GLOBAL.
+          tracking_number: shipment.group.trackingNumber,
           occurred_at: body.occurred_at,
         },
       });

@@ -16,7 +16,7 @@ import { auth } from "@clerk/nextjs/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/auth-helpers";
-import { generateId, generateTrackingNumber } from "@/lib/ids";
+import { generateId, generateTrackingNumber, generateGroupTrackingNumber } from "@/lib/ids";
 import { ApiError, handleApiError } from "@/lib/api-error";
 import { toShipmentDTO } from "@/lib/dto";
 import { quoteMultiOriginSum } from "@/lib/quote-engine";
@@ -89,8 +89,10 @@ export async function POST(req: NextRequest) {
     });
 
     const orderId = generateId("ord");
-    // ADR-005: un único tracking compartido para todos los shipments del pedido.
-    const orderTrackingNumber = generateTrackingNumber();
+    // ADR-006: el pedido completo es un ShipmentGroup, dueño del tracking GLOBAL
+    // ("BMK-…") — el único que ve el comprador. Se crea una vez por pedido.
+    const groupId = generateId("grp");
+    const orderTrackingNumber = generateGroupTrackingNumber();
     const now = new Date();
     const expiresAt = new Date(now.getTime() + 60 * 60 * 1000);
 
@@ -106,6 +108,20 @@ export async function POST(req: NextRequest) {
           shipment: Awaited<ReturnType<typeof tx.shipment.create>>;
           packages: Array<Awaited<ReturnType<typeof tx.package.create>>>;
         }> = [];
+
+        // ADR-006: crear el grupo del pedido antes de los shipments.
+        await tx.shipmentGroup.create({
+          data: {
+            id: groupId,
+            orderId,
+            buyerProfileId: body.buyer_profile_id,
+            trackingNumber: orderTrackingNumber,
+            status: ShipmentStatus.ready_for_pickup,
+            serviceLevel,
+            shippingAddressSnapshot: shippingAddressSnapshot as unknown as object,
+            originsCount: body.pickups.length,
+          },
+        });
 
         for (let i = 0; i < body.pickups.length; i++) {
           const pickup = body.pickups[i];
@@ -149,11 +165,11 @@ export async function POST(req: NextRequest) {
               salesOrderId,
               sellerProfileId: pickup.seller_profile_id,
               buyerProfileId: body.buyer_profile_id,
+              shipmentGroupId: groupId,
               shippingQuoteId: quoteId,
               carrier: perOrigin.carrier,
               serviceLevel,
               trackingNumber,
-              orderTrackingNumber,
               labelUrl: "/labels/sample.pdf",
               status: ShipmentStatus.ready_for_pickup,
               weightGramsTotal: pickupWeights[i],
@@ -238,7 +254,9 @@ export async function POST(req: NextRequest) {
       discount_pct: quote.discountPct,
       total_gross_cents: quote.totalGrossCents,
       total_net_cents: quote.totalNetCents,
-      shipments: result.map((r) => toShipmentDTO(r.shipment, r.packages)),
+      shipments: result.map((r) =>
+        toShipmentDTO(r.shipment, r.packages, undefined, orderTrackingNumber),
+      ),
     };
 
     return NextResponse.json(response, { status: 201 });

@@ -41,10 +41,18 @@ export function toPackageDTO(p: PackageModel): PackageDTO {
   };
 }
 
+// ADR-006: el tracking GLOBAL del pedido vive en ShipmentGroup. Para mapear un
+// shipment a DTO necesitamos ese valor: o el shipment viene con la relación
+// `group` incluida, o se pasa explícito en `groupTrackingNumber`.
+type ShipmentWithGroup = ShipmentModel & {
+  group?: { trackingNumber: string } | null;
+};
+
 export function toShipmentDTO(
-  s: ShipmentModel,
+  s: ShipmentWithGroup,
   packages?: PackageModel[],
   orderPickups?: OrderPickupSummary[],
+  groupTrackingNumber?: string,
 ): ShipmentDTO {
   return {
     id: s.id,
@@ -56,7 +64,8 @@ export function toShipmentDTO(
     carrier: s.carrier,
     service_level: s.serviceLevel as ServiceLevel,
     tracking_number: s.trackingNumber,
-    order_tracking_number: s.orderTrackingNumber,
+    order_tracking_number:
+      groupTrackingNumber ?? s.group?.trackingNumber ?? s.trackingNumber,
     label_url: s.labelUrl,
     status: s.status as ShipmentStatus,
     weight_grams_total: s.weightGramsTotal,
@@ -135,18 +144,27 @@ export function toTrackingEventDTO(e: TrackingEventModel): TrackingEventDTO {
   };
 }
 
-export function toShipmentGroupDTO(
-  orderId: string,
+// ADR-006: el grupo es una entidad (ShipmentGroup). El DTO usa su tracking
+// GLOBAL y su status persistido (rollup), no recalcula desde los shipments.
+// `unique_sellers`, pesos y costos sí se derivan de los shipments hijos.
+type ShipmentGroupModel = {
+  id: string;
+  orderId: string;
+  trackingNumber: string;
+  status: ShipmentStatus | string;
+  serviceLevel: ServiceLevel | string;
+  shippingAddressSnapshot: unknown;
+  buyerProfileId: string;
+  createdAt: Date;
+};
+
+export function toShipmentGroupDTOFromEntity(
+  group: ShipmentGroupModel,
   shipmentsWithPackages: Array<ShipmentModel & { packages: PackageModel[] }>,
 ): ShipmentGroupDTO {
-  if (shipmentsWithPackages.length === 0) {
-    throw new Error("toShipmentGroupDTO: shipmentsWithPackages no puede estar vacío");
-  }
-
   const sorted = [...shipmentsWithPackages].sort(
     (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
   );
-  const first = sorted[0];
 
   const statuses = sorted.map((s) => s.status as ShipmentStatus);
   const statusBreakdown: Partial<Record<ShipmentStatus, number>> = {};
@@ -155,37 +173,39 @@ export function toShipmentGroupDTO(
   }
 
   const aggregate: ShipmentGroupAggregate = {
-    order_tracking_number: first.orderTrackingNumber,
+    order_tracking_number: group.trackingNumber,
     origins_count: sorted.length,
     unique_sellers: Array.from(new Set(sorted.map((s) => s.sellerProfileId))),
     total_weight_grams: sorted.reduce((sum, s) => sum + s.weightGramsTotal, 0),
     total_cost_cents: sorted.reduce((sum, s) => sum + s.costCents, 0),
     currency: "ARS",
     status_breakdown: statusBreakdown,
-    rollup_status: rollupShipmentStatus(statuses),
-    service_level: first.serviceLevel as ServiceLevel,
-    shipping_address: first.shippingAddressSnapshot as unknown as Address,
-    buyer_profile_id: first.buyerProfileId,
-    earliest_created_at: first.createdAt.toISOString(),
+    rollup_status: group.status as ShipmentStatus,
+    service_level: group.serviceLevel as ServiceLevel,
+    shipping_address: group.shippingAddressSnapshot as unknown as Address,
+    buyer_profile_id: group.buyerProfileId,
+    earliest_created_at: (sorted[0]?.createdAt ?? group.createdAt).toISOString(),
   };
 
   return {
-    order_id: orderId,
+    order_id: group.orderId,
     aggregate,
-    shipments: sorted.map((s) => toShipmentDTO(s, s.packages)),
+    shipments: sorted.map((s) => toShipmentDTO(s, s.packages, undefined, group.trackingNumber)),
   };
 }
 
 export function toAssignmentDTO(
-  s: ShipmentModel & { packages: PackageModel[] },
+  s: ShipmentWithGroup & { packages: PackageModel[] },
   isSelfAssigned: boolean,
+  groupTrackingNumber?: string,
 ): AssignmentDTO {
   return {
     id: s.id,
     order_id: s.orderId,
     seller_profile_id: s.sellerProfileId,
     tracking_number: s.trackingNumber,
-    order_tracking_number: s.orderTrackingNumber,
+    order_tracking_number:
+      groupTrackingNumber ?? s.group?.trackingNumber ?? s.trackingNumber,
     status: s.status as ShipmentStatus,
     pickup_address: s.pickupAddressSnapshot as unknown as Address,
     shipping_address: s.shippingAddressSnapshot as unknown as Address,

@@ -74,6 +74,24 @@ Fuente de verdad de: `shipment_id`, paquetes, eventos de tracking, operadores lo
 | `expires_at` | timestamp | now + 60 min (calculado en aplicación) |
 | `created_at` | timestamp | |
 
+#### `shipment_groups` (ADR-006 — el "pedido completo")
+Una orden del comprador con N vendedores genera N `shipments` (uno por seller). El `shipment_group` (1 por `order_id`) los agrupa y es **dueño del tracking GLOBAL del pedido** — el único que ve el comprador. Invariante: **siempre existe un grupo**, tenga 1 o N vendedores (el mono-vendedor es un caso particular del general, sin branching).
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| `id` | string PK | `grp_…` |
+| `order_id` | string unique | ref opaca a Buyer; 1 grupo por orden |
+| `buyer_profile_id` | string | |
+| `tracking_number` | string unique | tracking GLOBAL del pedido (`"BMK-" + random10`). **El único que ve el comprador.** |
+| `status` | enum (ver §6) | rollup persistido de los N shipments (`recomputeGroupStatus`, reusa `rollupShipmentStatus`) |
+| `service_level` | enum | |
+| `shipping_address_snapshot` | json | |
+| `origins_count` | int | cantidad de vendedores del pedido |
+| `assigned_operator_clerk_user_id` | string? | operador dueño del pedido entero (guard race-safe de auto-asignación). null = disponible |
+| `created_at` / `updated_at` | timestamps | |
+
+Índices: `(buyer_profile_id)`, `(status)`. `order_id` y `tracking_number` son unique.
+
 #### `shipments`
 | Campo | Tipo | Notas |
 |---|---|---|
@@ -83,10 +101,11 @@ Fuente de verdad de: `shipment_id`, paquetes, eventos de tracking, operadores lo
 | `sales_order_id` | string | ref opaca a Seller |
 | `seller_profile_id` | string | |
 | `buyer_profile_id` | string | |
+| `shipment_group_id` | string FK → shipment_groups | **ADR-006**: pedido al que pertenece. El tracking global vive en el grupo, no se denormaliza acá. onDelete cascade. |
 | `shipping_quote_id` | string FK? → shipping_quotes | |
 | `carrier` | string | |
 | `service_level` | enum | |
-| `tracking_number` | string unique | generado en aplicación (`"TRK-AR-" + random8`) |
+| `tracking_number` | string unique | tracking INDIVIDUAL del pickup (`"TRK-AR-" + random8`). **Lo ve solo el vendedor de ese envío.** |
 | `label_url` | string | sprint 1: placeholder estático |
 | `status` | enum (ver §6) | |
 | `weight_grams_total` | int | |
@@ -98,7 +117,7 @@ Fuente de verdad de: `shipment_id`, paquetes, eventos de tracking, operadores lo
 | `shipped_at` / `delivered_at` | timestamps? | |
 | `created_at` / `updated_at` | timestamps | |
 
-Índices: `(order_id)`, `(sales_order_id)`, `(tracking_number)`, `(status)`.
+Índices: `(order_id)`, `(order_seller_group_id)`, `(sales_order_id)`, `(seller_profile_id)`, `(buyer_profile_id)`, `(shipment_group_id)`, `(tracking_number)`, `(status)`, `(created_at)`.
 
 #### `packages`
 | Campo | Tipo | Notas |
@@ -122,10 +141,13 @@ Fuente de verdad de: `shipment_id`, paquetes, eventos de tracking, operadores lo
 | `created_at` | timestamp | |
 
 #### `delivery_assignments`
+**ADR-006**: la asignación es a nivel **pedido** (grupo) — un operador toma el pedido entero y maneja todos los pickups de todos los vendedores. La FK real es `shipment_group_id`; `shipment_id` queda nullable/legacy.
+
 | Campo | Tipo | Notas |
 |---|---|---|
 | `id` | string PK | `dla_…` |
-| `shipment_id` | string FK | |
+| `shipment_group_id` | string? FK → shipment_groups | nivel real de asignación (el pedido completo) |
+| `shipment_id` | string? FK | nullable/legacy (asignaciones históricas por-envío) |
 | `operator_clerk_user_id` | string | |
 | `status` | enum `assigned` \| `accepted` \| `picked_up` \| `delivered` \| `reassigned` \| `cancelled` | |
 | `assigned_at` | timestamp | |
@@ -156,14 +178,17 @@ Fuente de verdad de: `shipment_id`, paquetes, eventos de tracking, operadores lo
 
 ```mermaid
 erDiagram
+    shipment_groups ||--o{ shipments : "groups (1 per order)"
+    shipment_groups ||--o{ delivery_assignments : "assigned (whole order)"
     shipping_quotes ||--o{ shipments : "may convert to"
     shipments ||--o{ packages : has
     shipments ||--o{ tracking_events : tracked
-    shipments ||--o{ delivery_assignments : assigned
     shipments ||--|| delivery_proofs : "may have"
     shipments ||--o{ shipment_status_history : audited
     logistics_operators ||--o{ delivery_assignments : performs
 ```
+
+> **ADR-006**: `tracking_number` del comprador = `shipment_groups.tracking_number` (`BMK-…`, global). `tracking_number` del vendedor = `shipments.tracking_number` (`TRK-AR-…`, individual). El operador y el comprador ven el pedido completo (todos los vendedores); cada vendedor ve solo su envío.
 
 ---
 
@@ -183,7 +208,8 @@ Diagrama + tabla completa de transiciones permitidas en `06-estados-y-diagramas.
 | Dato | Apps que lo tienen | Fuente de verdad | Estrategia en Shipping |
 |---|---|---|---|
 | Identidad de usuario | Cada app tiene su Clerk | El Clerk de cada app | Sin sync entre Clerks. Operador logístico = cuenta en Clerk-Shipping. |
-| `shipment_id` y estado de envío | **Shipping (verdad)**, Buyer, Seller | **Shipping App** | Shipping notifica con `PATCH` REST a Buyer y Seller; ellos guardan `shipping_status` espejo. |
+| `shipment_id` y estado de envío | **Shipping (verdad)**, Buyer, Seller | **Shipping App** | Shipping notifica con `PATCH` REST a Buyer y Seller; ellos guardan `shipping_status` espejo. **ADR-006**: a Buyer se le manda el tracking GLOBAL del pedido (`BMK-…`); a Seller, el `shipment_id` de su envío. |
+| Tracking del pedido (global) vs del envío (individual) | **Shipping (verdad)** | **Shipping App** | `shipment_groups.tracking_number` (`BMK-…`) lo ve el comprador; `shipments.tracking_number` (`TRK-AR-…`) lo ve cada vendedor para su propio envío. |
 | `order_id` y estado de la orden | Buyer (verdad), Shipping | **Buyer App** | Shipping guarda `order_id` como string opaco. Nunca consulta a Buyer en runtime (solo notifica). |
 | `sales_order_id` | Seller (verdad), Shipping | **Seller App** | Ref opaca; nunca se consulta. |
 | `seller_profile_id` + pickup_address | Seller (verdad), Shipping (snapshot) | **Seller App** | Shipping hidrata `pickup_address` una vez (al crear quote/shipment) y la guarda como snapshot. Nunca se actualiza. |

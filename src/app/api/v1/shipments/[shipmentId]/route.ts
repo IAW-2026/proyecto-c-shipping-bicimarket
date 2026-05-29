@@ -9,6 +9,7 @@ import { requireAdmin, getActiveOperator } from "@/lib/auth-helpers";
 import { ApiError, handleApiError } from "@/lib/api-error";
 import { generateId } from "@/lib/ids";
 import { toShipmentDTO } from "@/lib/dto";
+import { recomputeGroupStatus } from "@/lib/group-status";
 import { patchShipmentStatusSchema } from "@/validation/shipments";
 import { StatusHistorySource } from "@/generated/prisma/client";
 import type { Address } from "@/types/common";
@@ -34,17 +35,20 @@ export async function GET(
 
     const shipment = await prisma.shipment.findUnique({
       where: { id: shipmentId },
-      include: { packages: true },
+      include: {
+        packages: true,
+        group: { select: { trackingNumber: true } },
+      },
     });
     if (!shipment) {
       throw new ApiError("NOT_FOUND", 404, "Shipment inexistente");
     }
 
-    // ADR-005: hidratar TODOS los pickups del mismo order_id (incluido este
-    // shipment) para que la UI del operador pueda renderizar el diagrama de
-    // flujo multi-vendedor sin round-trips extra. length===1 si es single.
+    // ADR-006: hidratar TODOS los pickups del mismo pedido (grupo), incluido
+    // este shipment, para que la UI del operador renderice el diagrama de flujo
+    // multi-vendedor sin round-trips extra. length===1 si es single.
     const orderShipments = await prisma.shipment.findMany({
-      where: { orderId: shipment.orderId },
+      where: { shipmentGroupId: shipment.shipmentGroupId },
       select: {
         id: true,
         trackingNumber: true,
@@ -105,7 +109,10 @@ export async function PATCH(
       const next = await tx.shipment.update({
         where: { id: shipmentId },
         data: { status: body.status },
-        include: { packages: true },
+        include: {
+          packages: true,
+          group: { select: { trackingNumber: true } },
+        },
       });
 
       await tx.shipmentStatusHistory.create({
@@ -121,6 +128,9 @@ export async function PATCH(
           occurredAt: new Date(),
         },
       });
+
+      // ADR-006: el override manual también recomputa el rollup del pedido.
+      await recomputeGroupStatus(tx, next.shipmentGroupId);
 
       return next;
     });

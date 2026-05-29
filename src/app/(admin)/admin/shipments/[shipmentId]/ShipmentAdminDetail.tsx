@@ -118,14 +118,14 @@ export function ShipmentAdminDetail({ shipmentId }: ShipmentAdminDetailProps) {
                 {shipment.tracking_number}
               </h1>
               <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                pickup
+                envío del vendedor
               </span>
               <StatusBadge status={shipment.status} />
             </div>
             {shipment.order_tracking_number &&
               shipment.order_tracking_number !== shipment.tracking_number && (
                 <p className="font-mono text-xs text-muted-foreground">
-                  Pedido ·{" "}
+                  <span className="font-sans">Tracking del pedido (lo ve el comprador) ·</span>{" "}
                   <span className="text-foreground">
                     {shipment.order_tracking_number}
                   </span>
@@ -152,19 +152,19 @@ export function ShipmentAdminDetail({ shipmentId }: ShipmentAdminDetailProps) {
         </div>
       </div>
 
-      {/* ADR-005: banner cuando es parte de un pedido multi-vendedor */}
+      {/* ADR-006: banner cuando es parte de un pedido multi-vendedor */}
       {shipment.order_pickups && shipment.order_pickups.length > 1 && (
         <section className="flex flex-wrap items-start gap-3 rounded-xl border border-primary/30 bg-primary/10 p-4">
           <Info className="mt-0.5 size-4 shrink-0 text-primary" />
           <div className="flex-1 space-y-2">
             <p className="text-sm">
               Este envío es{" "}
-              <strong>1 de {shipment.order_pickups.length}</strong> pickups
-              del pedido{" "}
+              <strong>1 de {shipment.order_pickups.length}</strong> del pedido{" "}
               <span className="font-mono">
                 {shipment.order_tracking_number}
               </span>
-              . Los demás envíos del mismo pedido:
+              . El operador asignado gestiona <strong>todos</strong>. Los demás
+              envíos del pedido:
             </p>
             <ul className="flex flex-wrap gap-2 text-xs">
               {shipment.order_pickups
@@ -360,11 +360,16 @@ export function ShipmentAdminDetail({ shipmentId }: ShipmentAdminDetailProps) {
 
         {/* Col der */}
         <div className="space-y-4">
-          {/* Asignación */}
+          {/* Asignación (ADR-006: a nivel pedido — un operador gestiona todos
+              los envíos del pedido, no solo este) */}
           <section className="rounded-xl border border-border bg-card p-5">
-            <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Asignación
+            <h2 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Asignación del pedido
             </h2>
+            <p className="mb-3 text-[11px] text-muted-foreground">
+              El operador gestiona todos los envíos del pedido (todos los
+              vendedores).
+            </p>
             {currentAssignment ? (
               <div className="space-y-3">
                 <div className="flex items-start gap-3">
@@ -418,7 +423,7 @@ export function ShipmentAdminDetail({ shipmentId }: ShipmentAdminDetailProps) {
             ) : (
               <div className="space-y-3">
                 <p className="text-sm text-muted-foreground">
-                  Sin operador asignado.
+                  Sin operador asignado al pedido.
                 </p>
                 <Button onClick={() => setAssignOpen(true)} size="sm">
                   Asignar operador
@@ -481,7 +486,7 @@ export function ShipmentAdminDetail({ shipmentId }: ShipmentAdminDetailProps) {
         open={assignOpen}
         onOpenChange={setAssignOpen}
         shipmentId={shipment.id}
-        trackingNumber={shipment.tracking_number}
+        trackingNumber={shipment.order_tracking_number}
         currentAssignment={
           currentAssignment
             ? {

@@ -16,6 +16,7 @@ import {
 } from "@/generated/prisma/client";
 import { assertTransition } from "@/lib/transitions";
 import { logger } from "@/lib/logger";
+import { recomputeGroupStatus } from "@/lib/group-status";
 import type { DeliverShipmentResponse } from "@/types/tracking-events";
 
 export async function POST(
@@ -34,6 +35,7 @@ export async function POST(
 
     const shipment = await prisma.shipment.findUnique({
       where: { id: shipmentId },
+      include: { group: { select: { trackingNumber: true } } },
     });
     if (!shipment) throw new ApiError("NOT_FOUND", 404, "Shipment inexistente");
 
@@ -83,24 +85,29 @@ export async function POST(
         },
       });
 
-      // Cerrar assignment activo del operador, si existe
-      await tx.deliveryAssignment.updateMany({
-        where: {
-          shipmentId,
-          operatorClerkUserId: operator.clerkUserId,
-          status: {
-            in: [
-              AssignmentStatus.assigned,
-              AssignmentStatus.accepted,
-              AssignmentStatus.picked_up,
-            ],
+      // ADR-006: recomputar el rollup del pedido. La asignación es a nivel
+      // grupo (un operador maneja todo el pedido), así que solo la cerramos
+      // cuando TODOS los pickups del pedido están entregados.
+      const rollup = await recomputeGroupStatus(tx, shipment.shipmentGroupId);
+      if (rollup === ShipmentStatus.delivered) {
+        await tx.deliveryAssignment.updateMany({
+          where: {
+            shipmentGroupId: shipment.shipmentGroupId,
+            operatorClerkUserId: operator.clerkUserId,
+            status: {
+              in: [
+                AssignmentStatus.assigned,
+                AssignmentStatus.accepted,
+                AssignmentStatus.picked_up,
+              ],
+            },
           },
-        },
-        data: {
-          status: AssignmentStatus.delivered,
-          completedAt: occurredAt,
-        },
-      });
+          data: {
+            status: AssignmentStatus.delivered,
+            completedAt: occurredAt,
+          },
+        });
+      }
 
       return proof;
     });
@@ -114,7 +121,8 @@ export async function POST(
       payload: {
         shipping_status: "delivered",
         shipment_id: shipment.id,
-        tracking_number: shipment.trackingNumber,
+        // ADR-006: el comprador sigue el pedido por el tracking GLOBAL.
+        tracking_number: shipment.group.trackingNumber,
         occurred_at: occurredAtIso,
       },
     });

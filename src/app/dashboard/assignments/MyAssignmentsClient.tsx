@@ -44,23 +44,29 @@ export function MyAssignmentsClient({
     useMyAssignments();
   const actionsBlocked = operatorStatus !== "active";
 
-  const all = data?.data ?? [];
+  const all = useMemo(() => data?.data ?? [], [data]);
+
+  // ADR-006: la unidad es el PEDIDO (un operador toma el pedido entero), no el
+  // envío suelto. Contamos y mostramos PEDIDOS. Un pedido cuenta para una tab
+  // si alguno de sus envíos está en ese estado.
+  const allGroups = useMemo(() => groupAssignmentsByOrder(all), [all]);
 
   const counts = useMemo(() => {
     const map: Record<Tab, number> = {
-      all: all.length,
+      all: allGroups.length,
       to_pickup: 0,
       in_progress: 0,
       out_for_delivery: 0,
     };
-    for (const a of all) {
-      if (a.status === "ready_for_pickup") map.to_pickup++;
-      if (a.status === "picked_up" || a.status === "in_transit")
+    for (const g of allGroups) {
+      const statuses = g.assignments.map((a) => a.status);
+      if (statuses.includes("ready_for_pickup")) map.to_pickup++;
+      if (statuses.some((s) => s === "picked_up" || s === "in_transit"))
         map.in_progress++;
-      if (a.status === "out_for_delivery") map.out_for_delivery++;
+      if (statuses.includes("out_for_delivery")) map.out_for_delivery++;
     }
     return map;
-  }, [all]);
+  }, [allGroups]);
 
   const filtered = useMemo(() => {
     const allowed = TAB_STATUSES[tab];
@@ -68,28 +74,28 @@ export function MyAssignmentsClient({
     return all.filter((a) => allowed.includes(a.status));
   }, [all, tab]);
 
-  // Agrupar por order_id (ADR-005). Pedidos multi-vendedor (siblings>1) se
+  // Agrupar por pedido (ADR-006). Pedidos multi-vendedor (siblings>1) se
   // renderizan con OrderPickupCard, single-origen se mantiene en
-  // ShipmentMobileCard como antes.
+  // ShipmentMobileCard.
   const groups = useMemo(() => groupAssignmentsByOrder(filtered), [filtered]);
 
-  const totalActive = all.length;
+  const totalActive = allGroups.length;
   const greeting = greetingFor(new Date());
 
   return (
     <div className="space-y-4">
       <header className="flex items-start justify-between gap-2">
         <div>
-          <h1 className="font-heading text-xl font-semibold">Mis envíos</h1>
+          <h1 className="font-heading text-xl font-semibold">Mis pedidos</h1>
           <p className="text-xs text-muted-foreground">
             {greeting}, {firstName} ·{" "}
             {isLoading
               ? "cargando…"
               : totalActive === 1
-                ? "1 activo"
+                ? "1 pedido activo"
                 : totalActive === 0
                   ? "al día"
-                  : `${totalActive} activos`}
+                  : `${totalActive} pedidos activos`}
           </p>
         </div>
         <Button
@@ -110,7 +116,7 @@ export function MyAssignmentsClient({
 
       {isError && (
         <ErrorBanner
-          title="Error cargando tus envíos"
+          title="Error cargando tus pedidos"
           subtitle="Reintentá. Si persiste, avisá a tu coordinador."
           onRetry={() => refetch()}
         />
@@ -147,15 +153,15 @@ export function MyAssignmentsClient({
         <EmptyState
           icon={PackageCheck}
           variant="primary"
-          title="Al día, no tenés envíos asignados"
-          subtitle="Cuando un coordinador te asigne envíos vas a verlos acá. Tirá para refrescar."
+          title="Al día, no tenés pedidos asignados"
+          subtitle="Cuando tomes un pedido disponible o un coordinador te asigne uno, lo vas a ver acá. Tirá para refrescar."
           cta={{ label: "Refrescar", onClick: () => refetch() }}
         />
       ) : filtered.length === 0 ? (
         <EmptyState
           icon={PackageCheck}
           variant="muted"
-          title="Sin envíos en este estado"
+          title="Sin pedidos en este estado"
           subtitle="Probá con otro filtro arriba."
         />
       ) : (

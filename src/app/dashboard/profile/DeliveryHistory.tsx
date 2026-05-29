@@ -113,7 +113,8 @@ function DeliveryCard({ delivery }: { delivery: MyDeliveryDTO }) {
 
         {isPartOfMultiOrigin && (
           <p className="font-mono text-[10px] text-muted-foreground">
-            Pedido · {delivery.order_tracking_number}
+            <span className="font-sans">El comprador vio ·</span>{" "}
+            {delivery.order_tracking_number}
           </p>
         )}
 

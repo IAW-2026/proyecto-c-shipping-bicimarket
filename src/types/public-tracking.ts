@@ -18,16 +18,16 @@ import type { TrackingEventType } from "./tracking-events";
  */
 export interface PublicTrackingDTO {
   /**
-   * El código que el usuario buscó (puede ser el TRK individual del pickup o
-   * el TRK del pedido entero). Es el que se muestra como "Código de
-   * seguimiento" en la pantalla.
+   * El código que el usuario buscó y que se muestra como título. Si buscó por
+   * el global del pedido (`BMK-…`) coincide con `order_tracking_number`; si
+   * buscó por el de un envío individual de un vendedor, es ese `TRK-AR-…`.
    */
   tracking_number: string;
   /**
-   * ADR-005: TRK del pedido entero (compartido entre N pickups si es
-   * multi-vendedor). Si es distinto del `tracking_number`, significa que el
-   * usuario buscó por el individual y se le informa el del pedido como
-   * contexto.
+   * ADR-006: tracking GLOBAL del pedido, formato `BMK-…`. Vive en el
+   * ShipmentGroup (1 por pedido) y es el ÚNICO que ve el comprador. Si
+   * coincide con `tracking_number`, el usuario buscó por el global; si
+   * difiere, buscó por un envío individual y le informamos el del pedido.
    */
   order_tracking_number: string;
   /**

@@ -8,7 +8,7 @@ export const filterConfigsShipments: FilterConfig[] = [
   {
     columnId: "tracking_number",
     type: "input",
-    placeholder: "Tracking #",
+    placeholder: "Tracking (BMK- o TRK-AR-)",
     isPrincipal: true,
     isCompact: true,
   },

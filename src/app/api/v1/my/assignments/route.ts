@@ -13,10 +13,7 @@ import { prisma } from "@/lib/prisma";
 import { getOperatorRecord } from "@/lib/auth-helpers";
 import { ApiError, handleApiError } from "@/lib/api-error";
 import { toAssignmentDTO } from "@/lib/dto";
-import {
-  ShipmentStatus,
-  AssignmentStatus,
-} from "@/generated/prisma/client";
+import { ShipmentStatus } from "@/generated/prisma/client";
 import type { Shipment, Package } from "@/generated/prisma/client";
 
 const ACTIVE_SHIPMENT_STATUSES = [
@@ -26,13 +23,10 @@ const ACTIVE_SHIPMENT_STATUSES = [
   ShipmentStatus.out_for_delivery,
 ];
 
-const ACTIVE_ASSIGNMENT_STATUSES = [
-  AssignmentStatus.assigned,
-  AssignmentStatus.accepted,
-  AssignmentStatus.picked_up,
-];
-
-type ShipmentWithPackages = Shipment & { packages: Package[] };
+type ShipmentWithGroupAndPackages = Shipment & {
+  packages: Package[];
+  group: { trackingNumber: string; assignedOperatorClerkUserId: string | null };
+};
 
 export async function GET(_req: NextRequest) {
   try {
@@ -44,28 +38,19 @@ export async function GET(_req: NextRequest) {
       throw new ApiError("FORBIDDEN", 403, "Operador requerido");
     }
 
-    // Combinamos los dos sets en una sola query con OR.
-    // (a) Asignados al operador con assignment activo, en cualquier estado activo.
-    // (b) ready_for_pickup sin ningún assignment activo.
+    // ADR-006: la asignación es a nivel PEDIDO (ShipmentGroup). Combinamos:
+    // (a) shipments de pedidos asignados al operador (group.assignedOperator = yo).
+    // (b) shipments ready_for_pickup de pedidos que nadie tomó (group sin dueño).
     const shipments = await prisma.shipment.findMany({
       where: {
         OR: [
           {
             status: { in: ACTIVE_SHIPMENT_STATUSES },
-            assignments: {
-              some: {
-                operatorClerkUserId: operator.clerkUserId,
-                status: { in: ACTIVE_ASSIGNMENT_STATUSES },
-              },
-            },
+            group: { assignedOperatorClerkUserId: operator.clerkUserId },
           },
           {
             status: ShipmentStatus.ready_for_pickup,
-            assignments: {
-              none: {
-                status: { in: ACTIVE_ASSIGNMENT_STATUSES },
-              },
-            },
+            group: { assignedOperatorClerkUserId: null },
           },
         ],
       },
@@ -75,21 +60,17 @@ export async function GET(_req: NextRequest) {
       ],
       include: {
         packages: true,
-        assignments: {
-          where: {
-            operatorClerkUserId: operator.clerkUserId,
-            status: { in: ACTIVE_ASSIGNMENT_STATUSES },
-          },
-          select: { id: true },
+        group: {
+          select: { trackingNumber: true, assignedOperatorClerkUserId: true },
         },
       },
       take: 50,
     });
 
-    const data = shipments.map((s) => {
-      const { assignments, ...rest } = s;
-      const isSelf = assignments.length > 0;
-      return toAssignmentDTO(rest as ShipmentWithPackages, isSelf);
+    const data = (shipments as ShipmentWithGroupAndPackages[]).map((s) => {
+      const isSelf =
+        s.group.assignedOperatorClerkUserId === operator.clerkUserId;
+      return toAssignmentDTO(s, isSelf);
     });
 
     // Self primero, después disponibles. Dentro de cada grupo respeta createdAt desc.

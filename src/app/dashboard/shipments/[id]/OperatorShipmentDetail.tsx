@@ -119,23 +119,25 @@ export function OperatorShipmentDetail({
       {/* Banner si el operador está suspended/inactive */}
       <OperatorStatusBanner status={operatorStatus} />
 
-      {/* ADR-005: banner cuando el envío es parte de un pedido multi-vendedor */}
+      {/* ADR-006: banner cuando el envío es parte de un pedido multi-vendedor */}
       {isMultiOrigin && (
         <div className="flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/10 p-3 text-xs text-foreground">
           <Info className="mt-0.5 size-4 shrink-0 text-primary" />
           <div className="space-y-1">
             <p>
-              Estás viendo el pickup de un vendedor. El pedido completo (
+              Estás viendo el envío de un vendedor. Vos gestionás el{" "}
+              <strong>pedido completo</strong> (
               <span className="font-mono">
                 {shipment.order_tracking_number}
               </span>
-              ) tiene <strong>{orderPickups.length}</strong> orígenes.
+              ) — <strong>{orderPickups.length}</strong> vendedores. El flujo de
+              abajo muestra todos los retiros y el estado consolidado.
             </p>
             <Link
               href="/dashboard/assignments"
               className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
             >
-              Ver pedido completo
+              Volver a mis pedidos
               <ChevronLeft className="size-3 rotate-180" />
             </Link>
           </div>

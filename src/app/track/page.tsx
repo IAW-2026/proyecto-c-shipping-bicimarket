@@ -27,15 +27,11 @@ export default function TrackSearchPage() {
           Seguí tu envío
         </h1>
         <p className="text-sm text-muted-foreground">
-          Ingresá el código de seguimiento que te dieron al comprar. Empieza con{" "}
+          Ingresá el código de tu pedido que te dimos al comprar. Empieza con{" "}
           <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">
-            TRK-AR-
+            BMK-
           </code>{" "}
-          o{" "}
-          <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">
-            shp_
-          </code>
-          .
+          y sigue tu pedido completo, aunque tenga varios vendedores.
         </p>
       </div>
 
@@ -48,7 +44,7 @@ export default function TrackSearchPage() {
           autoFocus
           value={code}
           onChange={(e) => setCode(e.target.value)}
-          placeholder="TRK-AR-78451209"
+          placeholder="BMK-1234567890"
           className="border-0 bg-transparent font-mono text-base shadow-none focus-visible:ring-0 focus-visible:border-0"
         />
         <Button type="submit" size="sm" disabled={!code.trim()}>
@@ -58,7 +54,9 @@ export default function TrackSearchPage() {
 
       <div className="rounded-xl border border-dashed border-border bg-muted/40 p-4 text-center">
         <p className="text-xs text-muted-foreground">
-          También aceptamos el ID interno del envío (<code className="font-mono">shp_…</code>).
+          También aceptamos el código de un envío individual (
+          <code className="font-mono">TRK-AR-…</code>) o el ID interno (
+          <code className="font-mono">shp_…</code>) — te llevamos igual a tu pedido completo.
           Si no encontrás tu código, revisá el email de confirmación de tu compra o
           escribí a{" "}
           <a

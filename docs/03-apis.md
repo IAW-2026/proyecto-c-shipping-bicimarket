@@ -258,7 +258,14 @@ Auth: S2S (típicamente Buyer App). **Response 200**: lista paginada de shipment
 Para correcciones admin. **Auth**: rol `admin` o `logistics`.
 
 **Request**: `{ "status": "in_transit", "note": "Demora por feriado" }`.
-**Response 200**: shipment actualizado.
+**Response 200**: shipment actualizado. (Recomputa el rollup del pedido.)
+
+### `GET /api/v1/shipment-groups/{groupId}` — ADR-006
+Vista GLOBAL del pedido (todos los vendedores + sus pickups). **Auth**: JWT admin u operador. `groupId` acepta el `grp_…` o el tracking global `BMK-…`.
+
+**Response 200**: `ShipmentGroupDTO` (`order_id`, `aggregate` con `order_tracking_number`/`rollup_status`/`origins_count`/etc., y `shipments[]`).
+
+> **ADR-006 — tracking global del pedido**: una orden con N vendedores se agrupa en un `shipment_group` (1 por `order_id`) dueño del tracking GLOBAL (`order_tracking_number`, formato `BMK-…`) — el ÚNICO que ve el comprador. Cada `shipment` conserva su `tracking_number` individual (`TRK-AR-…`), que ve solo su vendedor. El `ShipmentDTO` de SH2 incluye ambos: `tracking_number` (individual) y `order_tracking_number` (global del grupo). La asignación del operador es a nivel pedido (toma el grupo entero). Ver `docs/04 §3.1 shipment_groups` y `docs/06 §4`.
 
 ---
 
@@ -455,11 +462,13 @@ Tras el delivered, Shipping notifica:
 {
   "shipping_status": "in_transit",
   "shipment_id": "shp_01H…",
-  "tracking_number": "TRK-AR-789",
+  "tracking_number": "BMK-1234567890",
   "occurred_at": "2026-04-26T08:10:00Z"
 }
 ```
 `shipping_status`: `ready_for_pickup` | `picked_up` | `in_transit` | `out_for_delivery` | `delivered` | `failed_delivery` | `returned`.
+
+> **ADR-006**: `tracking_number` aquí es el tracking GLOBAL del pedido (`BMK-…`) — el que el comprador usa para seguir su pedido completo. CR3 (Seller) y CR4 (Payments) siguen siendo por `shipment`/`sales_order`/`order_seller_group` (la liquidación es por vendedor; no cambia).
 
 **Response 200**: el seller_group actualizado.
 

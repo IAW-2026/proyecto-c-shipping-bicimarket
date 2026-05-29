@@ -97,9 +97,13 @@ export function AssignOperatorDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Asignar envío a operador</DialogTitle>
-          <DialogDescription className="font-mono text-xs">
-            {trackingNumber}
+          <DialogTitle>Asignar pedido a operador</DialogTitle>
+          <DialogDescription className="space-y-1">
+            <span className="block font-mono text-xs">{trackingNumber}</span>
+            <span className="block text-[11px] text-muted-foreground">
+              El operador gestiona <strong>todos los envíos del pedido</strong>{" "}
+              (todos los vendedores), no solo uno.
+            </span>
           </DialogDescription>
         </DialogHeader>
 

@@ -8,7 +8,7 @@ import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
 import { requireServiceToken } from "@/lib/service-auth";
 import { requireAdmin } from "@/lib/auth-helpers";
-import { generateId, generateTrackingNumber } from "@/lib/ids";
+import { generateId, generateTrackingNumber, generateGroupTrackingNumber } from "@/lib/ids";
 import { ApiError, handleApiError } from "@/lib/api-error";
 import { paginate } from "@/lib/pagination";
 import { toShipmentDTO } from "@/lib/dto";
@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
     if (idempotencyKey) {
       const existing = await prisma.shipment.findUnique({
         where: { idempotencyKey },
-        include: { packages: true },
+        include: { packages: true, group: { select: { trackingNumber: true } } },
       });
       if (existing) {
         return NextResponse.json(toShipmentDTO(existing, existing.packages));
@@ -67,18 +67,27 @@ export async function POST(req: NextRequest) {
     const shipmentId = generateId("shp");
     const trackingNumber = generateTrackingNumber();
 
-    // ADR-005: el tracking del PEDIDO se comparte entre todos los Shipment del
-    // mismo order_id. Si ya existe algún sibling, reusamos el suyo; si es el
-    // primer shipment de este order_id, generamos uno nuevo. Buyer expone solo
-    // este; operador/admin ven ambos.
-    const existingSibling = await prisma.shipment.findFirst({
-      where: { orderId: body.order_id },
-      select: { orderTrackingNumber: true },
-    });
-    const orderTrackingNumber =
-      existingSibling?.orderTrackingNumber ?? generateTrackingNumber();
-
     const result = await prisma.$transaction(async (tx) => {
+      // ADR-006: el pedido completo es un ShipmentGroup (1 por order_id), dueño
+      // del tracking GLOBAL ("BMK-…") — el único que ve el comprador. El primer
+      // shipment de un order_id crea el grupo; los siguientes solo incrementan
+      // originsCount. El upsert sobre order_id @unique resuelve atómicamente la
+      // carrera de dos primeros shipments concurrentes (sin copy-del-sibling).
+      const group = await tx.shipmentGroup.upsert({
+        where: { orderId: body.order_id },
+        update: { originsCount: { increment: 1 } },
+        create: {
+          id: generateId("grp"),
+          orderId: body.order_id,
+          buyerProfileId: body.buyer_profile_id,
+          trackingNumber: generateGroupTrackingNumber(),
+          status: ShipmentStatus.ready_for_pickup,
+          serviceLevel: quote.serviceLevel,
+          shippingAddressSnapshot: body.shipping_address_snapshot as unknown as object,
+          originsCount: 1,
+        },
+      });
+
       const shipment = await tx.shipment.create({
         data: {
           id: shipmentId,
@@ -87,11 +96,11 @@ export async function POST(req: NextRequest) {
           salesOrderId: body.sales_order_id,
           sellerProfileId: body.seller_profile_id,
           buyerProfileId: body.buyer_profile_id,
+          shipmentGroupId: group.id,
           shippingQuoteId: quote.id,
           carrier: quote.carrier,
           serviceLevel: quote.serviceLevel,
           trackingNumber,
-          orderTrackingNumber,
           labelUrl: "/labels/sample.pdf", // sprint 1 placeholder
           status: ShipmentStatus.ready_for_pickup,
           weightGramsTotal: quote.weightGramsTotal,
@@ -146,11 +155,16 @@ export async function POST(req: NextRequest) {
         },
       });
 
-      return { shipment, packagesCreated };
+      return { shipment, packagesCreated, group };
     });
 
     return NextResponse.json(
-      toShipmentDTO(result.shipment, result.packagesCreated),
+      toShipmentDTO(
+        result.shipment,
+        result.packagesCreated,
+        undefined,
+        result.group.trackingNumber,
+      ),
       { status: 201 },
     );
   } catch (err) {
@@ -180,7 +194,7 @@ export async function GET(req: NextRequest) {
         {
           where: { orderId },
           orderBy: { createdAt: "desc" },
-          include: { packages: true },
+          include: { packages: true, group: { select: { trackingNumber: true } } },
         },
         {
           page: Number(searchParams.get("page") ?? 1),
@@ -238,7 +252,7 @@ export async function GET(req: NextRequest) {
       {
         where,
         orderBy: { [sortColumn[sortBy] ?? "createdAt"]: sortDir },
-        include: { packages: true },
+        include: { packages: true, group: { select: { trackingNumber: true } } },
       },
       {
         page: Number(searchParams.get("page") ?? 1),

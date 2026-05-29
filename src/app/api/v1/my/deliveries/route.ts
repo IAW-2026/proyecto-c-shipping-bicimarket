@@ -7,18 +7,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getOperatorRecord } from "@/lib/auth-helpers";
 import { ApiError, handleApiError } from "@/lib/api-error";
-import { AssignmentStatus } from "@/generated/prisma/client";
-import type {
-  DeliveryAssignment,
-  Shipment,
-  Package,
-} from "@/generated/prisma/client";
+import { ShipmentStatus } from "@/generated/prisma/client";
+import type { Shipment, Package } from "@/generated/prisma/client";
 import type { MyDeliveryDTO } from "@/types/assignments";
 import type { Address, PaginatedResponse } from "@/types/common";
 import type { ServiceLevel } from "@/types/shipments";
 
-type AssignmentWithShipment = DeliveryAssignment & {
-  shipment: Shipment & { packages: Package[] };
+type ShipmentWithGroupAndPackages = Shipment & {
+  packages: Package[];
+  group: { trackingNumber: string };
 };
 
 export async function GET(req: NextRequest) {
@@ -37,37 +34,40 @@ export async function GET(req: NextRequest) {
       Math.max(1, Number(searchParams.get("limit")) || 20),
     );
 
+    // ADR-006: la asignación es a nivel pedido. El historial del operador son
+    // los shipments entregados de los pedidos que él tomó (group dueño = él).
     const where = {
-      operatorClerkUserId: operator.clerkUserId,
-      status: AssignmentStatus.delivered,
+      status: ShipmentStatus.delivered,
+      group: { assignedOperatorClerkUserId: operator.clerkUserId },
     };
 
     const [rows, total] = await Promise.all([
-      prisma.deliveryAssignment.findMany({
+      prisma.shipment.findMany({
         where,
-        orderBy: { completedAt: "desc" },
-        include: { shipment: { include: { packages: true } } },
+        orderBy: { deliveredAt: "desc" },
+        include: {
+          packages: true,
+          group: { select: { trackingNumber: true } },
+        },
         skip: (page - 1) * limit,
         take: limit,
       }),
-      prisma.deliveryAssignment.count({ where }),
+      prisma.shipment.count({ where }),
     ]);
 
-    const data: MyDeliveryDTO[] = (rows as AssignmentWithShipment[]).map(
-      (a) => ({
-        id: a.id,
-        shipment_id: a.shipmentId,
-        tracking_number: a.shipment.trackingNumber,
-        order_tracking_number: a.shipment.orderTrackingNumber,
-        order_id: a.shipment.orderId,
-        // completedAt está garantizado en delivered (lo setea POST /deliver),
-        // pero el schema lo permite nullable → fallback a updatedAt por las dudas.
-        delivered_at: (a.completedAt ?? a.updatedAt).toISOString(),
-        shipping_address: a.shipment.shippingAddressSnapshot as unknown as Address,
-        weight_grams_total: a.shipment.weightGramsTotal,
-        packages_count: a.shipment.packages.length,
-        carrier: a.shipment.carrier,
-        service_level: a.shipment.serviceLevel as ServiceLevel,
+    const data: MyDeliveryDTO[] = (rows as ShipmentWithGroupAndPackages[]).map(
+      (s) => ({
+        id: s.id,
+        shipment_id: s.id,
+        tracking_number: s.trackingNumber,
+        order_tracking_number: s.group.trackingNumber,
+        order_id: s.orderId,
+        delivered_at: (s.deliveredAt ?? s.updatedAt).toISOString(),
+        shipping_address: s.shippingAddressSnapshot as unknown as Address,
+        weight_grams_total: s.weightGramsTotal,
+        packages_count: s.packages.length,
+        carrier: s.carrier,
+        service_level: s.serviceLevel as ServiceLevel,
       }),
     );
 

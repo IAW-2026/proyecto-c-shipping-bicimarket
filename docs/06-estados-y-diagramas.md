@@ -78,9 +78,16 @@ Toda transición inválida debe rechazarse con `409 INVALID_TRANSITION`. Esta ta
 
 ---
 
-## 4. Estado agregado del pedido (ADR-005, derivado)
+## 4. Estado agregado del pedido (ADR-006 — entidad persistida)
 
-Una orden con N vendedores genera N `Shipment` con el mismo `order_id`. La máquina de estado de arriba sigue siendo **por shipment** — cada uno transiciona independiente. **No** persistimos un "estado del pedido". Sin embargo, cuando se marca el último shipment de un `order_id` como `picked_up` y todos los demás del mismo `order_id` ya están en `picked_up` o más adelante, el handler de tracking-events emite un log derivado:
+Una orden con N vendedores genera N `Shipment` agrupados por un **`shipment_group`** (1 por `order_id`). La máquina de estado de arriba sigue siendo **por shipment** — cada pickup transiciona independiente. El estado del pedido se **persiste** en `shipment_group.status` como rollup de los N shipments, recomputado dentro de la misma transacción que cambia cualquier shipment (`recomputeGroupStatus`, reusa `rollupShipmentStatus`):
+
+1. Todos `delivered` → grupo `delivered`.
+2. Alguno `failed_delivery` → grupo `failed_delivery` (prioridad de atención).
+3. Alguno `returned` → grupo `returned`.
+4. Si no, el estado **menos avanzado** (el bottleneck del pedido).
+
+Además, cuando se marca el último pickup de un pedido como `picked_up` y todos los demás del mismo grupo ya están en `picked_up` o más adelante, el handler de tracking-events emite un log derivado (CR2, "todos retirados"):
 
 ```
 { level: "outbound-deferred", target: "buyer", method: "POST",
@@ -88,6 +95,6 @@ Una orden con N vendedores genera N `Shipment` con el mismo `order_id`. La máqu
   payload: { order_id, shipment_ids: [shp_..., shp_...], occurred_at } }
 ```
 
-Aplica solo cuando `siblings.length > 1` (pedidos multi-vendedor). Para pedidos single-origen alcanza con los CR2/CR3 individuales — no se emite el log agregado.
+Aplica solo cuando el grupo tiene >1 shipment (multi-vendedor). Para single-origen alcanza con los CR2/CR3 individuales.
 
-> **Sprint 1 (ADR-002)**: este log queda como `outbound-deferred`. En sprint 2 se convierte en una llamada real al Buyer (CR2 consolidado o un endpoint nuevo). La UI del operador (`OrderPickupCard` en `/dashboard/assignments`) usa el mismo razonamiento en el cliente para mostrar la card como "Todos retirados" y habilitar el avance bulk a `in_transit`.
+> **Sprint 1 (ADR-002)**: este log queda como `outbound-deferred`. En sprint 2 se convierte en una llamada real al Buyer. La UI del operador (`OrderPickupCard` en `/dashboard/assignments`) y la pública (`OrderShipmentFlow`) consumen `order_pickups[]` + el rollup del grupo para mostrar "Todos retirados" y el avance bulk a `in_transit`.

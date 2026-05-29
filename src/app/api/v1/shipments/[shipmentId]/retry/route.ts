@@ -26,6 +26,7 @@ import {
 import { generateId, generateTrackingNumber } from "@/lib/ids";
 import { ApiError, handleApiError } from "@/lib/api-error";
 import { toShipmentDTO } from "@/lib/dto";
+import { recomputeGroupStatus } from "@/lib/group-status";
 import {
   AssignmentStatus,
   ShipmentStatus,
@@ -68,7 +69,7 @@ export async function POST(
 
     const original = await prisma.shipment.findUnique({
       where: { id: shipmentId },
-      include: { packages: true },
+      include: { packages: true, group: { select: { trackingNumber: true } } },
     });
     if (!original) {
       throw new ApiError("NOT_FOUND", 404, "Shipment inexistente");
@@ -124,12 +125,12 @@ export async function POST(
           salesOrderId: original.salesOrderId,
           sellerProfileId: original.sellerProfileId,
           buyerProfileId: original.buyerProfileId,
+          // ADR-006: el retry es un nuevo pickup DENTRO del mismo pedido (grupo).
+          shipmentGroupId: original.shipmentGroupId,
           shippingQuoteId: newQuoteId,
           carrier: original.carrier,
           serviceLevel: original.serviceLevel,
           trackingNumber: newTrackingNumber,
-          // ADR-005: el retry hereda el tracking del pedido (mismo order_id).
-          orderTrackingNumber: original.orderTrackingNumber,
           labelUrl: "/labels/sample.pdf",
           status: ShipmentStatus.ready_for_pickup,
           weightGramsTotal: original.weightGramsTotal,
@@ -207,7 +208,9 @@ export async function POST(
         },
       });
 
-      // 7. Cerrar el assignment activo del original (si lo hay)
+      // 7. Cerrar el assignment activo del original (si lo hay).
+      //    Legacy/no-op en el modelo grupo (la asignación vive en el grupo),
+      //    pero cubre asignaciones por-shipment que pudieran existir.
       await tx.deliveryAssignment.updateMany({
         where: {
           shipmentId: original.id,
@@ -218,6 +221,14 @@ export async function POST(
           completedAt: now,
         },
       });
+
+      // 8. ADR-006: el nuevo pickup se suma al grupo; recomputamos el rollup
+      //    (el original quedó returned, el nuevo ready_for_pickup).
+      await tx.shipmentGroup.update({
+        where: { id: original.shipmentGroupId },
+        data: { originsCount: { increment: 1 } },
+      });
+      await recomputeGroupStatus(tx, original.shipmentGroupId);
 
       return { newShipment, newPackages };
     });
@@ -247,7 +258,12 @@ export async function POST(
     });
 
     return NextResponse.json(
-      toShipmentDTO(result.newShipment, result.newPackages),
+      toShipmentDTO(
+        result.newShipment,
+        result.newPackages,
+        undefined,
+        original.group.trackingNumber,
+      ),
       { status: 201 },
     );
   } catch (err) {
