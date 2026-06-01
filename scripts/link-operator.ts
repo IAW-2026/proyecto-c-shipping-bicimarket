@@ -20,7 +20,7 @@ import { PrismaClient } from "../src/generated/prisma/client";
 const prisma = new PrismaClient();
 
 async function main() {
-  const [, , clerkUserId, operatorName = "Juan Pérez"] = process.argv;
+  const [, , clerkUserId, operatorName = "Shipp Operator 1"] = process.argv;
 
   if (!clerkUserId || !clerkUserId.startsWith("user_")) {
     console.error("❌ Falta el clerk_user_id (debe empezar con 'user_').");

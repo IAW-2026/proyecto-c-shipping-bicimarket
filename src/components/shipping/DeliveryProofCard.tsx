@@ -3,6 +3,7 @@ import { Camera, ExternalLink } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatDateShort } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { ProofImage } from "@/components/shipping/ProofImage";
 import { useDeliveryProof } from "@/hooks/querys/shipments/useDeliveryProof";
 import type { ShipmentStatus } from "@/types/shipments";
 
@@ -60,19 +61,16 @@ export function DeliveryProofCard({
               className="group block overflow-hidden rounded-lg border border-border"
               aria-label="Abrir foto en tamaño completo"
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
+              <ProofImage
                 src={proof.proof_photo_url}
-                alt="Prueba de entrega"
                 className="aspect-video w-full bg-muted object-cover transition-opacity group-hover:opacity-90"
-                loading="lazy"
               />
             </a>
           ) : (
-            <div className="flex aspect-video w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border bg-muted/30 text-xs text-muted-foreground">
-              <Camera className="size-5" strokeWidth={1.5} />
-              <span>Entrega sin foto</span>
-            </div>
+            <ProofImage
+              src={null}
+              className="aspect-video w-full rounded-lg border border-border bg-muted object-cover"
+            />
           )}
 
           <div className="space-y-1.5 text-sm">

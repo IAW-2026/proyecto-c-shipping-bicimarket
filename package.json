@@ -9,7 +9,9 @@
     "lint": "eslint",
     "db:seed": "tsx prisma/seed.ts",
     "db:reset": "prisma migrate reset --force",
-    "db:link-operator": "tsx scripts/link-operator.ts"
+    "db:link-operator": "tsx scripts/link-operator.ts",
+    "set-admin": "tsx scripts/set-admin.ts",
+    "clear-storage": "tsx scripts/clear-storage.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

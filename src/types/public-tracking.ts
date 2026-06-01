@@ -79,10 +79,20 @@ export interface PublicTrackingDTO {
     occurred_at: string;
   }>;
 
-  // Prueba de entrega (solo si delivered)
-  proof?: {
-    photo_url: string | null;
-    note: string | null;
-    delivered_at: string;
-  };
+  /**
+   * Pruebas de entrega. ADR-006: en la vista ENVÍO (TRK) hay como máximo UNA
+   * (el envío es atómico). En la vista PEDIDO (BMK) puede haber varias — una
+   * por cada vendedor que ya entregó — y la UI las muestra en un carrusel.
+   * Vacío si todavía no hay ninguna entrega.
+   */
+  proofs: PublicTrackingProof[];
+}
+
+export interface PublicTrackingProof {
+  photo_url: string | null;
+  note: string | null;
+  delivered_at: string;
+  /** Solo en vista PEDIDO: a qué vendedor/envío corresponde esta foto. */
+  seller_profile_id?: string;
+  tracking_number?: string;
 }

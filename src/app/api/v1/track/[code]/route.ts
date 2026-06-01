@@ -16,7 +16,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { ApiError, handleApiError } from "@/lib/api-error";
-import type { PublicTrackingDTO } from "@/types/public-tracking";
+import type {
+  PublicTrackingDTO,
+  PublicTrackingProof,
+} from "@/types/public-tracking";
 import type {
   ShipmentStatus,
   ServiceLevel,
@@ -106,6 +109,9 @@ export async function GET(
     let orderTrackingToReturn: string;
     let statusToReturn: ShipmentStatus;
     let orderPickups: OrderPickupSummary[];
+    // ADR-006: la vista PEDIDO junta una prueba por cada vendedor que entregó;
+    // la vista ENVÍO tiene a lo sumo una (es atómica).
+    let proofs: PublicTrackingProof[];
 
     if (isOrderView && shipmentGroupId) {
       // Vista PEDIDO: tracking global + estado consolidado + todos los pickups.
@@ -121,6 +127,9 @@ export async function GET(
           status: true,
           pickupAddressSnapshot: true,
           createdAt: true,
+          deliveryProof: {
+            select: { proofPhotoUrl: true, note: true, deliveredAt: true },
+          },
         },
         orderBy: { createdAt: "asc" },
       });
@@ -134,6 +143,15 @@ export async function GET(
           status: s.status as ShipmentStatus,
         };
       });
+      proofs = orderShipments
+        .filter((s) => s.deliveryProof)
+        .map((s) => ({
+          photo_url: s.deliveryProof!.proofPhotoUrl,
+          note: s.deliveryProof!.note,
+          delivered_at: s.deliveryProof!.deliveredAt.toISOString(),
+          seller_profile_id: s.sellerProfileId,
+          tracking_number: s.trackingNumber,
+        }));
     } else {
       // Vista ENVÍO: solo este envío. No exponemos el pedido ni los otros
       // vendedores — el vendedor ve únicamente su propio flujo.
@@ -149,6 +167,15 @@ export async function GET(
           status: shipment.status as ShipmentStatus,
         },
       ];
+      proofs = shipment.deliveryProof
+        ? [
+            {
+              photo_url: shipment.deliveryProof.proofPhotoUrl,
+              note: shipment.deliveryProof.note,
+              delivered_at: shipment.deliveryProof.deliveredAt.toISOString(),
+            },
+          ]
+        : [];
     }
 
     const dto: PublicTrackingDTO = {
@@ -182,13 +209,7 @@ export async function GET(
         note: e.note,
         occurred_at: e.occurredAt.toISOString(),
       })),
-      ...(shipment.deliveryProof && {
-        proof: {
-          photo_url: shipment.deliveryProof.proofPhotoUrl,
-          note: shipment.deliveryProof.note,
-          delivered_at: shipment.deliveryProof.deliveredAt.toISOString(),
-        },
-      }),
+      proofs,
     };
 
     return NextResponse.json(dto);

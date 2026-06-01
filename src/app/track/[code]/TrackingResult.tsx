@@ -12,9 +12,17 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorBanner } from "@/components/feedback/ErrorBanner";
 import { EmptyState } from "@/components/feedback/EmptyState";
 import { StatusBadge } from "@/components/status/StatusBadge";
+import {
+  Carousel,
+  CarouselContent,
+  CarouselItem,
+  CarouselNext,
+  CarouselPrevious,
+} from "@/components/ui/carousel";
 import { ShipmentRouteMap } from "@/components/shipping/ShipmentRouteMap";
 import { OrderShipmentFlow } from "@/components/shipping/OrderShipmentFlow";
 import { TrackingTimeline } from "@/components/shipping/TrackingTimeline";
+import { ProofImage } from "@/components/shipping/ProofImage";
 import { useTracking } from "@/hooks/querys/track/useTracking";
 import { distanceBetweenPostalCodes } from "@/lib/geo/distance";
 import {
@@ -23,7 +31,7 @@ import {
   formatWeightKg,
 } from "@/lib/format";
 import { SERVICE_LEVEL_STYLES } from "@/lib/status-styles";
-import type { PublicTrackingDTO } from "@/types/public-tracking";
+import type { PublicTrackingProof } from "@/types/public-tracking";
 
 interface TrackingResultProps {
   code: string;
@@ -185,8 +193,9 @@ export function TrackingResult({ code }: TrackingResultProps) {
         />
       </div>
 
-      {/* Foto de prueba si está entregado */}
-      {data.proof && <ProofCard proof={data.proof} />}
+      {/* Prueba(s) de entrega. ADR-006: vista PEDIDO (BMK) puede tener varias
+          fotos (una por vendedor) → carrusel; vista ENVÍO (TRK) tiene una sola. */}
+      <ProofGallery proofs={data.proofs} />
 
       {/* Timeline */}
       <section className="rounded-xl border border-border bg-card p-4 sm:p-5">
@@ -255,35 +264,71 @@ function SummaryCard({
   );
 }
 
-function ProofCard({
-  proof,
-}: {
-  proof: NonNullable<PublicTrackingDTO["proof"]>;
-}) {
+/**
+ * Galería de pruebas de entrega. ADR-006:
+ *  - 0 fotos → no renderiza nada.
+ *  - 1 foto (típico de TRK, atómico) → tarjeta única, sin carrusel.
+ *  - N fotos (PEDIDO BMK con varios vendedores) → carrusel con todas.
+ */
+function ProofGallery({ proofs }: { proofs: PublicTrackingProof[] }) {
+  if (proofs.length === 0) return null;
+  if (proofs.length === 1) return <ProofCard proof={proofs[0]} />;
+
   return (
     <section className="space-y-3 rounded-xl border border-emerald-600/30 bg-emerald-600/5 p-4">
+      <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
+        <Truck className="size-3" />
+        Entregas del pedido · {proofs.length} fotos
+      </h2>
+      <Carousel className="w-full" opts={{ align: "start" }}>
+        <CarouselContent>
+          {proofs.map((proof, i) => (
+            <CarouselItem key={proof.tracking_number ?? i}>
+              <ProofCard proof={proof} embedded />
+            </CarouselItem>
+          ))}
+        </CarouselContent>
+        <CarouselPrevious type="button" className="left-2" />
+        <CarouselNext type="button" className="right-2" />
+      </Carousel>
+    </section>
+  );
+}
+
+function ProofCard({
+  proof,
+  embedded,
+}: {
+  proof: PublicTrackingProof;
+  embedded?: boolean;
+}) {
+  return (
+    <section
+      className={
+        embedded
+          ? "space-y-3"
+          : "space-y-3 rounded-xl border border-emerald-600/30 bg-emerald-600/5 p-4"
+      }
+    >
       <div className="flex items-center justify-between gap-2">
         <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-emerald-700 dark:text-emerald-400">
           <Truck className="size-3" />
-          Entregado
+          {proof.seller_profile_id ? (
+            <span className="font-mono normal-case">
+              {proof.seller_profile_id}
+            </span>
+          ) : (
+            "Entregado"
+          )}
         </h2>
         <span className="text-xs text-muted-foreground">
           {formatDateLong(proof.delivered_at)}
         </span>
       </div>
-      {proof.photo_url ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={proof.photo_url}
-          alt="Prueba de entrega"
-          className="aspect-video w-full rounded-lg border border-border object-cover"
-          loading="lazy"
-        />
-      ) : (
-        <div className="flex aspect-video w-full items-center justify-center rounded-lg border border-dashed border-border bg-card text-xs text-muted-foreground">
-          Entrega sin foto
-        </div>
-      )}
+      <ProofImage
+        src={proof.photo_url}
+        className="aspect-video w-full rounded-lg border border-border object-cover"
+      />
       {proof.note && (
         <p className="rounded-md border border-border bg-card px-2.5 py-1.5 text-xs italic text-foreground/80">
           “{proof.note}”

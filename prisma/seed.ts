@@ -10,25 +10,22 @@
  *
  * Contenido del seed:
  *   - 45 shipping_rates (5 distancias × 3 pesos × 3 services).
- *   - 2 operadores demo (Juan en van, María en moto).
- *   - 8 pedidos con casos de uso que cubren single + multi-vendedor en
- *     distintos puntos de la máquina de estado. Diseñado para que las
- *     pantallas del operador, admin y pública muestren situaciones reales.
+ *   - 2 operadores (Shipp Operator 1 en van, Shipp Operator 2 en moto), con los
+ *     clerk_user_id de la instancia de Clerk de corrección IAW.
+ *   - 16 pedidos con casos de uso que cubren single + multi-vendedor en TODOS
+ *     los estados de la máquina (ready_for_pickup, picked_up, in_transit,
+ *     out_for_delivery, delivered, failed_delivery, returned), repartidos entre
+ *     los dos operadores + pedidos libres para probar el flujo de toma.
  *
- * Casos de uso del seed:
- *   1. DISPONIBLE_SINGLE       — single-origen, ready_for_pickup, sin operador
- *   2. EN_TRANSITO_SINGLE      — single-origen, in_transit, asignado a Juan
- *   3. ENTREGADO_SINGLE        — single-origen, delivered + proof, Juan
- *   4. FALLIDO_SINGLE          — single-origen, failed_delivery, María
- *   5. MULTI_INICIAL           — 2 orígenes, ambos ready_for_pickup, libre
- *   6. MULTI_PARCIAL           — 3 orígenes, 2 picked_up + 1 ready, Juan
- *   7. MULTI_EN_TRANSITO       — 2 orígenes, ambos in_transit, Juan
- *   8. MULTI_ENTREGADO         — 2 orígenes, ambos delivered + proofs, Juan
+ * Usuarios de Clerk (instancia de corrección IAW · password iawuser#):
+ *   - admin       → shippadminclerktest@iaw.com    (user_3EXPeawZ7uS0qMoJKXBh2Y7KAez)
+ *   - operador 1  → shippoperatorclerktest@iaw.com  (user_3EXPkNL3zcKOxsZ4vOOWSFLwjYV)
+ *   - operador 2  → shipp2operatorclerktest@iaw.com (user_3EXQArb88hJNwuID3ON1cqjGOA0)
  *
- * Operadores en Clerk: para loguearte como Juan o María hay que crear esos
- * usuarios en Clerk Dashboard con publicMetadata.role="logistics" y los
- * clerk_user_id que aparecen abajo. AUTO_PROVISION_OPERATORS=true crea la
- * fila DB cuando se loguean por primera vez.
+ * El seed crea las filas DB de los 2 operadores. El admin NO es un operador:
+ * se reconoce por publicMetadata.admin=true en Clerk (setear con
+ * `npm run set-admin` o a mano en el dashboard). AUTO_PROVISION_OPERATORS=true
+ * sincroniza email/nombre de los operadores en su primer login.
  */
 
 import "dotenv/config";
@@ -173,6 +170,16 @@ const ADDR: Record<string, SeedAddress> = {
     country: "AR",
     receiver_name: "Carlos Rodríguez",
   },
+  buyerPalermo: {
+    street: "Av. Santa Fe",
+    number: "3200",
+    apartment: "12A",
+    city: "Palermo",
+    province: "Buenos Aires",
+    postal_code: "C1425",
+    country: "AR",
+    receiver_name: "Lucía Fernández",
+  },
 };
 
 // Sellers (refs opacas a Seller App).
@@ -185,6 +192,7 @@ const SELLERS = {
 const BUYERS = {
   maria: "byp_mariagonzalez",
   carlos: "byp_carlosrodriguez",
+  lucia: "byp_luciafernandez",
 } as const;
 
 // ── Tarifaría (idéntica al seed anterior) ─────────────────────────────────
@@ -263,9 +271,9 @@ const RATES = (() => {
 const OPERATORS = [
   {
     id: generateId("lop"),
-    clerkUserId: "user_demo_juan",
-    fullName: "Juan Pérez",
-    email: "juan.perez@bicimarket.demo",
+    clerkUserId: "user_3EXPkNL3zcKOxsZ4vOOWSFLwjYV",
+    fullName: "Shipp Operator 1",
+    email: "shippoperatorclerktest@iaw.com",
     phone: "+5491133333333",
     documentId: "30123456",
     vehicleType: VehicleType.van,
@@ -274,9 +282,9 @@ const OPERATORS = [
   },
   {
     id: generateId("lop"),
-    clerkUserId: "user_demo_maria",
-    fullName: "María López",
-    email: "maria.lopez@bicimarket.demo",
+    clerkUserId: "user_3EXQArb88hJNwuID3ON1cqjGOA0",
+    fullName: "Shipp Operator 2",
+    email: "shipp2operatorclerktest@iaw.com",
     phone: "+5491144444444",
     documentId: "32987654",
     vehicleType: VehicleType.motorcycle,
@@ -344,10 +352,14 @@ const PKG_KIT = {
   description: "Kit luces + candado",
 };
 
+// OPERATORS[0] = Shipp Operator 1 (van) · OPERATORS[1] = Shipp Operator 2 (moto).
+// Cobertura completa de la máquina de estado (incluye out_for_delivery y returned),
+// repartida entre ambos operadores + pedidos libres para probar el flujo de toma.
 const SCENARIOS: ScenarioSpec[] = [
+  // ── Single-origen ────────────────────────────────────────────────────────
   {
     label: "DISPONIBLE_SINGLE",
-    description: "Disponible para cualquier operador, single-origen",
+    description: "Single-origen, listo para retirar, sin operador (libre)",
     serviceLevel: ServiceLevel.standard,
     shippingAddress: ADDR.buyerCaba,
     buyerProfileId: BUYERS.maria,
@@ -363,8 +375,42 @@ const SCENARIOS: ScenarioSpec[] = [
     createdHoursAgo: 2,
   },
   {
+    label: "DISPONIBLE_SINGLE_2",
+    description: "Single-origen, listo para retirar, sin operador (libre)",
+    serviceLevel: ServiceLevel.express,
+    shippingAddress: ADDR.buyerPalermo,
+    buyerProfileId: BUYERS.lucia,
+    pickups: [
+      {
+        sellerProfileId: SELLERS.cicleria,
+        pickupAddress: ADDR.sanIsidro,
+        packages: [PKG_BIKE],
+      },
+    ],
+    finalStatus: ShipmentStatus.ready_for_pickup,
+    assignedToClerkUserId: null,
+    createdHoursAgo: 4,
+  },
+  {
+    label: "PICKED_UP_SINGLE",
+    description: "Single-origen, retirado del vendedor, operador 1",
+    serviceLevel: ServiceLevel.standard,
+    shippingAddress: ADDR.buyerCaba,
+    buyerProfileId: BUYERS.maria,
+    pickups: [
+      {
+        sellerProfileId: SELLERS.bikeShop,
+        pickupAddress: ADDR.villaCrespo,
+        packages: [PKG_KIT],
+      },
+    ],
+    finalStatus: ShipmentStatus.picked_up,
+    assignedToClerkUserId: OPERATORS[0].clerkUserId,
+    createdHoursAgo: 8,
+  },
+  {
     label: "EN_TRANSITO_SINGLE",
-    description: "En tránsito, asignado a Juan",
+    description: "Single-origen, en tránsito, operador 1",
     serviceLevel: ServiceLevel.express,
     shippingAddress: ADDR.buyerCaba,
     buyerProfileId: BUYERS.maria,
@@ -380,8 +426,25 @@ const SCENARIOS: ScenarioSpec[] = [
     createdHoursAgo: 30,
   },
   {
+    label: "EN_REPARTO_SINGLE",
+    description: "Single-origen, en reparto (out_for_delivery), operador 2",
+    serviceLevel: ServiceLevel.same_day,
+    shippingAddress: ADDR.buyerPalermo,
+    buyerProfileId: BUYERS.lucia,
+    pickups: [
+      {
+        sellerProfileId: SELLERS.pedalesPlata,
+        pickupAddress: ADDR.caballito,
+        packages: [PKG_HELMET],
+      },
+    ],
+    finalStatus: ShipmentStatus.out_for_delivery,
+    assignedToClerkUserId: OPERATORS[1].clerkUserId,
+    createdHoursAgo: 5,
+  },
+  {
     label: "ENTREGADO_SINGLE",
-    description: "Entregado con foto, asignado a Juan",
+    description: "Single-origen, entregado con foto, operador 1",
     serviceLevel: ServiceLevel.standard,
     shippingAddress: ADDR.buyerLaPlata,
     buyerProfileId: BUYERS.carlos,
@@ -397,8 +460,25 @@ const SCENARIOS: ScenarioSpec[] = [
     createdHoursAgo: 96,
   },
   {
+    label: "ENTREGADO_SINGLE_2",
+    description: "Single-origen, entregado con foto, operador 2",
+    serviceLevel: ServiceLevel.express,
+    shippingAddress: ADDR.buyerPalermo,
+    buyerProfileId: BUYERS.lucia,
+    pickups: [
+      {
+        sellerProfileId: SELLERS.cicleria,
+        pickupAddress: ADDR.florida,
+        packages: [PKG_TIRE],
+      },
+    ],
+    finalStatus: ShipmentStatus.delivered,
+    assignedToClerkUserId: OPERATORS[1].clerkUserId,
+    createdHoursAgo: 120,
+  },
+  {
     label: "FALLIDO_SINGLE",
-    description: "Entrega fallida, asignado a María",
+    description: "Single-origen, entrega fallida, operador 2",
     serviceLevel: ServiceLevel.express,
     shippingAddress: ADDR.buyerCaba,
     buyerProfileId: BUYERS.maria,
@@ -414,8 +494,26 @@ const SCENARIOS: ScenarioSpec[] = [
     createdHoursAgo: 48,
   },
   {
+    label: "DEVUELTO_SINGLE",
+    description: "Single-origen, devuelto al vendedor (returned), operador 1",
+    serviceLevel: ServiceLevel.standard,
+    shippingAddress: ADDR.buyerLaPlata,
+    buyerProfileId: BUYERS.carlos,
+    pickups: [
+      {
+        sellerProfileId: SELLERS.cicleria,
+        pickupAddress: ADDR.sanIsidro,
+        packages: [PKG_KIT],
+      },
+    ],
+    finalStatus: ShipmentStatus.returned,
+    assignedToClerkUserId: OPERATORS[0].clerkUserId,
+    createdHoursAgo: 200,
+  },
+  // ── Multi-vendedor ─────────────────────────────────────────────────────────
+  {
     label: "MULTI_INICIAL",
-    description: "Multi-vendedor (2 orígenes), ambos disponibles para retirar",
+    description: "Multi-vendedor (2 orígenes), ambos disponibles, libre",
     serviceLevel: ServiceLevel.standard,
     shippingAddress: ADDR.buyerCaba,
     buyerProfileId: BUYERS.maria,
@@ -436,8 +534,35 @@ const SCENARIOS: ScenarioSpec[] = [
     createdHoursAgo: 1,
   },
   {
+    label: "MULTI_INICIAL_3",
+    description: "Multi-vendedor (3 orígenes), todos disponibles, libre",
+    serviceLevel: ServiceLevel.express,
+    shippingAddress: ADDR.buyerPalermo,
+    buyerProfileId: BUYERS.lucia,
+    pickups: [
+      {
+        sellerProfileId: SELLERS.pedalesPlata,
+        pickupAddress: ADDR.caballito,
+        packages: [PKG_TIRE],
+      },
+      {
+        sellerProfileId: SELLERS.bikeShop,
+        pickupAddress: ADDR.almagro,
+        packages: [PKG_HELMET],
+      },
+      {
+        sellerProfileId: SELLERS.cicleria,
+        pickupAddress: ADDR.florida,
+        packages: [PKG_KIT],
+      },
+    ],
+    finalStatus: ShipmentStatus.ready_for_pickup,
+    assignedToClerkUserId: null,
+    createdHoursAgo: 3,
+  },
+  {
     label: "MULTI_PARCIAL",
-    description: "Multi-vendedor (3 orígenes), 2 retirados 1 pendiente, Juan",
+    description: "Multi-vendedor (3 orígenes), 2 retirados 1 pendiente, operador 1",
     serviceLevel: ServiceLevel.standard,
     shippingAddress: ADDR.buyerCaba,
     buyerProfileId: BUYERS.maria,
@@ -464,7 +589,7 @@ const SCENARIOS: ScenarioSpec[] = [
   },
   {
     label: "MULTI_EN_TRANSITO",
-    description: "Multi-vendedor (2 orígenes), ambos en tránsito, Juan",
+    description: "Multi-vendedor (2 orígenes), ambos en tránsito, operador 2",
     serviceLevel: ServiceLevel.express,
     shippingAddress: ADDR.buyerLaPlata,
     buyerProfileId: BUYERS.carlos,
@@ -481,12 +606,34 @@ const SCENARIOS: ScenarioSpec[] = [
       },
     ],
     finalStatus: ShipmentStatus.in_transit,
-    assignedToClerkUserId: OPERATORS[0].clerkUserId,
+    assignedToClerkUserId: OPERATORS[1].clerkUserId,
     createdHoursAgo: 12,
   },
   {
+    label: "MULTI_EN_REPARTO",
+    description: "Multi-vendedor (2 orígenes), ambos en reparto, operador 1",
+    serviceLevel: ServiceLevel.express,
+    shippingAddress: ADDR.buyerCaba,
+    buyerProfileId: BUYERS.maria,
+    pickups: [
+      {
+        sellerProfileId: SELLERS.pedalesPlata,
+        pickupAddress: ADDR.caballito,
+        packages: [PKG_KIT],
+      },
+      {
+        sellerProfileId: SELLERS.bikeShop,
+        pickupAddress: ADDR.almagro,
+        packages: [PKG_HELMET],
+      },
+    ],
+    finalStatus: ShipmentStatus.out_for_delivery,
+    assignedToClerkUserId: OPERATORS[0].clerkUserId,
+    createdHoursAgo: 10,
+  },
+  {
     label: "MULTI_ENTREGADO",
-    description: "Multi-vendedor (2 orígenes), ambos entregados con foto, Juan",
+    description: "Multi-vendedor (2 orígenes), ambos entregados con foto, operador 2",
     serviceLevel: ServiceLevel.standard,
     shippingAddress: ADDR.buyerCaba,
     buyerProfileId: BUYERS.maria,
@@ -503,8 +650,30 @@ const SCENARIOS: ScenarioSpec[] = [
       },
     ],
     finalStatus: ShipmentStatus.delivered,
-    assignedToClerkUserId: OPERATORS[0].clerkUserId,
+    assignedToClerkUserId: OPERATORS[1].clerkUserId,
     createdHoursAgo: 168,
+  },
+  {
+    label: "MULTI_FALLIDO",
+    description: "Multi-vendedor (2 orígenes), entrega fallida, operador 1",
+    serviceLevel: ServiceLevel.standard,
+    shippingAddress: ADDR.buyerLaPlata,
+    buyerProfileId: BUYERS.carlos,
+    pickups: [
+      {
+        sellerProfileId: SELLERS.cicleria,
+        pickupAddress: ADDR.florida,
+        packages: [PKG_TIRE],
+      },
+      {
+        sellerProfileId: SELLERS.bikeShop,
+        pickupAddress: ADDR.villaCrespo,
+        packages: [PKG_KIT],
+      },
+    ],
+    finalStatus: ShipmentStatus.failed_delivery,
+    assignedToClerkUserId: OPERATORS[0].clerkUserId,
+    createdHoursAgo: 72,
   },
 ];
 
@@ -754,14 +923,14 @@ async function seedScenario(spec: ScenarioSpec) {
 
     // Delivery proof si está delivered
     // proof_photo_url es NOT NULL en la DB actual (migración init) aunque el
-    // schema lo permite nullable. Mandamos placeholder para no fallar el seed;
-    // el componente de UI soporta null igualmente.
+    // schema lo permite nullable. Usamos la imagen de fallback local
+    // (/images.jpeg) como placeholder — el storage real arranca vacío.
     if (pickupFinalStatus === ShipmentStatus.delivered && deliveredAt) {
       await prisma.deliveryProof.create({
         data: {
           id: generateId("prf"),
           shipmentId,
-          proofPhotoUrl: "/labels/sample.pdf",
+          proofPhotoUrl: "/images.jpeg",
           signatureImageUrl: null,
           note: "Entregado en portería · firmó el conserje",
           deliveredAt,
@@ -837,13 +1006,13 @@ async function main() {
     );
   }
   console.log("");
-  console.log("📝 Para loguearte como operador:");
-  console.log("   1. Creá users en Clerk con publicMetadata.role='logistics'");
-  console.log("   2. Usá los clerk_user_ids de arriba.");
-  console.log("   3. AUTO_PROVISION_OPERATORS=true sincroniza on-login.");
-  console.log(
-    "   4. Para entrar como admin: publicMetadata.admin=true en Clerk.",
-  );
+  console.log("📝 Logins (instancia Clerk de corrección · password: iawuser#):");
+  console.log("   • admin      → shippadminclerktest@iaw.com");
+  console.log("   • operador 1 → shippoperatorclerktest@iaw.com");
+  console.log("   • operador 2 → shipp2operatorclerktest@iaw.com");
+  console.log("");
+  console.log("⚠️  El admin necesita publicMetadata.admin=true en Clerk:");
+  console.log("     correr `npm run set-admin` (o setearlo a mano en el dashboard).");
 }
 
 main()

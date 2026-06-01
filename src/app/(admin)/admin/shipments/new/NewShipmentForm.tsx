@@ -21,10 +21,10 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useAdminCreateShipment } from "@/hooks/querys/shipments/useAdminCreateShipment";
+import { useAdminParties } from "@/hooks/querys/parties/useAdminParties";
 import { geocodePostalCode } from "@/lib/geo/ar-postal-codes";
 import { distanceBetweenPostalCodes } from "@/lib/geo/distance";
 import { multiOriginDiscountFactor } from "@/lib/multi-origin-discount";
-import { PostalCodeCombobox } from "@/components/shipping/PostalCodeCombobox";
 import type { ServiceLevel } from "@/types/shipments";
 import type { CreateAdminShipmentBody } from "@/types/admin-shipments";
 
@@ -67,16 +67,6 @@ const EMPTY_PACKAGE: PackageRow = {
   description: "Producto de prueba",
 };
 
-const FIRST_PICKUP: PickupRow = {
-  seller_profile_id: "slp_pedalesplata",
-  pickup_street: "Av. Rivadavia",
-  pickup_number: "9000",
-  pickup_city: "Caballito",
-  pickup_province: "Buenos Aires",
-  pickup_postal: "C1406",
-  packages: [{ ...EMPTY_PACKAGE }],
-};
-
 const EMPTY_PICKUP: PickupRow = {
   seller_profile_id: "",
   pickup_street: "",
@@ -88,16 +78,16 @@ const EMPTY_PICKUP: PickupRow = {
 };
 
 const INITIAL: FormState = {
-  buyer_profile_id: "byp_mariagonzalez",
-  buyer_name: "María González",
+  buyer_profile_id: "",
+  buyer_name: "",
   service_level: "standard",
-  ship_street: "Av. Corrientes",
-  ship_number: "1234",
-  ship_apartment: "5B",
-  ship_city: "CABA",
-  ship_province: "Buenos Aires",
-  ship_postal: "C1043",
-  pickups: [{ ...FIRST_PICKUP }],
+  ship_street: "",
+  ship_number: "",
+  ship_apartment: "",
+  ship_city: "",
+  ship_province: "",
+  ship_postal: "",
+  pickups: [{ ...EMPTY_PICKUP, packages: [{ ...EMPTY_PACKAGE }] }],
 };
 
 export function NewShipmentForm() {
@@ -105,18 +95,61 @@ export function NewShipmentForm() {
   const [values, setValues] = useState<FormState>(INITIAL);
   const [error, setError] = useState<string | null>(null);
 
+  const { data: parties, isLoading: partiesLoading } = useAdminParties();
   const { mutate, isPending } = useAdminCreateShipment();
 
   function set<K extends keyof FormState>(key: K, value: FormState[K]) {
     setValues((v) => ({ ...v, [key]: value }));
   }
 
+  // Al elegir un comprador del select, cargamos su dirección de entrega completa
+  // desde la DB (queda read-only: no se puede crear un destino que no exista).
+  function selectBuyer(id: string) {
+    const b = parties?.buyers.find((x) => x.id === id);
+    if (!b) return;
+    setValues((v) => ({
+      ...v,
+      buyer_profile_id: b.id,
+      buyer_name: b.name ?? "",
+      ship_street: b.address.street,
+      ship_number: b.address.number,
+      ship_apartment: b.address.apartment ?? "",
+      ship_city: b.address.city,
+      ship_province: b.address.province,
+      ship_postal: b.address.postal_code,
+    }));
+  }
+
+  // Idem para el vendedor de cada origen: carga su dirección de retiro.
+  function selectSeller(i: number, id: string) {
+    const s = parties?.sellers.find((x) => x.id === id);
+    if (!s) return;
+    setValues((v) => ({
+      ...v,
+      pickups: v.pickups.map((p, idx) =>
+        idx === i
+          ? {
+              ...p,
+              seller_profile_id: s.id,
+              pickup_street: s.address.street,
+              pickup_number: s.address.number,
+              pickup_city: s.address.city,
+              pickup_province: s.address.province,
+              pickup_postal: s.address.postal_code,
+            }
+          : p,
+      ),
+    }));
+  }
+
+  const selectedBuyer = parties?.buyers.find(
+    (b) => b.id === values.buyer_profile_id,
+  );
+
   // ADR-005: preview de cotización por suma de tramos + descuento por
-  // cantidad de orígenes. Reemplaza el TSP del modelo anterior — cada origen
-  // cotiza independiente y se aplica un descuento lineal sobre la suma.
-  // Como no tenemos acceso a las tarifas reales desde el cliente, mostramos
-  // distancias y porcentaje de descuento; el costo final se calcula al
-  // crear el pedido.
+  // cantidad de orígenes. Los CPs vienen de las direcciones de los parties
+  // elegidos (siempre conocidos por el dataset), así que el preview matchea
+  // lo que va a calcular el backend al crear.
   type CostPreview =
     | {
         ok: true;
@@ -172,19 +205,6 @@ export function NewShipmentForm() {
       discountPct,
     };
   }, [values.pickups, values.ship_postal]);
-
-  function updatePickup<K extends keyof PickupRow>(
-    i: number,
-    key: K,
-    value: PickupRow[K],
-  ) {
-    setValues((v) => ({
-      ...v,
-      pickups: v.pickups.map((p, idx) =>
-        idx === i ? { ...p, [key]: value } : p,
-      ),
-    }));
-  }
 
   function addPickup() {
     setValues((v) => ({
@@ -247,6 +267,11 @@ export function NewShipmentForm() {
     e.preventDefault();
     setError(null);
 
+    if (!values.buyer_profile_id) {
+      setError("Elegí un comprador.");
+      return;
+    }
+
     const body: CreateAdminShipmentBody = {
       buyer_profile_id: values.buyer_profile_id.trim(),
       buyer_name: values.buyer_name.trim() || undefined,
@@ -284,7 +309,7 @@ export function NewShipmentForm() {
     for (let i = 0; i < body.pickups.length; i++) {
       const pk = body.pickups[i];
       if (!pk.seller_profile_id) {
-        setError(`Origen #${i + 1}: falta seller_profile_id`);
+        setError(`Origen #${i + 1}: elegí un vendedor`);
         return;
       }
       if (
@@ -317,39 +342,70 @@ export function NewShipmentForm() {
     });
   }
 
+  const noParties =
+    !partiesLoading &&
+    parties &&
+    (parties.sellers.length === 0 || parties.buyers.length === 0);
+
   const submitDisabled =
-    isPending || (costPreview !== null && !costPreview.ok);
+    isPending ||
+    partiesLoading ||
+    !values.buyer_profile_id ||
+    values.pickups.some((p) => !p.seller_profile_id) ||
+    (costPreview !== null && !costPreview.ok);
 
   return (
     <form
       onSubmit={handleSubmit}
       className="space-y-6 rounded-xl border border-border bg-card p-6"
     >
-      {/* Identidades opacas */}
+      {noParties && (
+        <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+          No hay vendedores o compradores cargados todavía. Corré el seed
+          (`npm run db:seed`) para tener datos de prueba.
+        </p>
+      )}
+
+      {/* Comprador + destino */}
       <Section
-        title="Identidades"
-        subtitle="ID opaco del Buyer. El seller se define por origen (más abajo)."
+        title="Comprador y destino"
+        subtitle="Elegí un comprador existente. Su dirección de entrega se carga automáticamente."
       >
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <Field label="Buyer profile ID" required>
-            <Input
-              value={values.buyer_profile_id}
-              onChange={(e) => set("buyer_profile_id", e.target.value)}
-              placeholder="byp_mariagonzalez"
-              className="font-mono"
-            />
-          </Field>
-          <Field
-            label="Nombre del receptor"
-            helper="Aparece en el detalle del operador (snapshot)."
+        <Field label="Comprador" required>
+          <Select
+            value={values.buyer_profile_id}
+            onValueChange={(id) => id && selectBuyer(id)}
+            disabled={partiesLoading}
           >
-            <Input
-              value={values.buyer_name}
-              onChange={(e) => set("buyer_name", e.target.value)}
-              placeholder="María González"
-            />
-          </Field>
-        </div>
+            <SelectTrigger>
+              <SelectValue
+                placeholder={
+                  partiesLoading ? "Cargando…" : "Elegí un comprador…"
+                }
+              />
+            </SelectTrigger>
+            <SelectContent>
+              {parties?.buyers.map((b) => (
+                <SelectItem key={b.id} value={b.id}>
+                  {b.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+
+        {values.buyer_profile_id && (
+          <AddressReadOnly
+            title="Dirección de entrega"
+            receiver={selectedBuyer?.name}
+            street={values.ship_street}
+            number={values.ship_number}
+            apartment={values.ship_apartment}
+            city={values.ship_city}
+            province={values.ship_province}
+            postal={values.ship_postal}
+          />
+        )}
       </Section>
 
       {/* Servicio */}
@@ -374,63 +430,10 @@ export function NewShipmentForm() {
         </Field>
       </Section>
 
-      {/* Destino único */}
-      <Section
-        title="Destino"
-        subtitle="Dirección única de entrega. Todos los orígenes terminan acá."
-      >
-        <Field label="Código postal" required>
-          <PostalCodeCombobox
-            value={values.ship_postal}
-            onSelect={(entry) => {
-              setValues((v) => ({
-                ...v,
-                ship_postal: entry.cp,
-                ship_city: entry.city,
-                ship_province: entry.province,
-              }));
-            }}
-            placeholder="Buscar CP de destino…"
-          />
-        </Field>
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <Field label="Calle" required>
-            <Input
-              value={values.ship_street}
-              onChange={(e) => set("ship_street", e.target.value)}
-            />
-          </Field>
-          <Field label="Número" required>
-            <Input
-              value={values.ship_number}
-              onChange={(e) => set("ship_number", e.target.value)}
-            />
-          </Field>
-          <Field label="Depto / piso">
-            <Input
-              value={values.ship_apartment}
-              onChange={(e) => set("ship_apartment", e.target.value)}
-            />
-          </Field>
-          <Field label="Ciudad">
-            <Input
-              value={values.ship_city}
-              onChange={(e) => set("ship_city", e.target.value)}
-            />
-          </Field>
-          <Field label="Provincia">
-            <Input
-              value={values.ship_province}
-              onChange={(e) => set("ship_province", e.target.value)}
-            />
-          </Field>
-        </div>
-      </Section>
-
       {/* Orígenes (lista) */}
       <Section
         title="Orígenes"
-        subtitle="Un pedido puede tener uno o más orígenes. Cada origen tiene su seller, dirección de retiro y paquetes propios."
+        subtitle="Un pedido puede tener uno o más orígenes. Elegí el vendedor de cada origen; su dirección de retiro se carga sola."
       >
         <div className="space-y-3">
           {values.pickups.map((p, i) => {
@@ -471,72 +474,39 @@ export function NewShipmentForm() {
                   )}
                 </div>
 
-                <Field label="Seller profile ID" required>
-                  <Input
+                <Field label="Vendedor" required>
+                  <Select
                     value={p.seller_profile_id}
-                    onChange={(e) =>
-                      updatePickup(i, "seller_profile_id", e.target.value)
-                    }
-                    placeholder="slp_pedalesplata"
-                    className="font-mono"
-                  />
+                    onValueChange={(id) => id && selectSeller(i, id)}
+                    disabled={partiesLoading}
+                  >
+                    <SelectTrigger>
+                      <SelectValue
+                        placeholder={
+                          partiesLoading ? "Cargando…" : "Elegí un vendedor…"
+                        }
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {parties?.sellers.map((s) => (
+                        <SelectItem key={s.id} value={s.id}>
+                          {s.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </Field>
 
-                <Field label="Código postal del retiro" required>
-                  <PostalCodeCombobox
-                    value={p.pickup_postal}
-                    onSelect={(entry) => {
-                      setValues((v) => ({
-                        ...v,
-                        pickups: v.pickups.map((pk, idx) =>
-                          idx === i
-                            ? {
-                                ...pk,
-                                pickup_postal: entry.cp,
-                                pickup_city: entry.city,
-                                pickup_province: entry.province,
-                              }
-                            : pk,
-                        ),
-                      }));
-                    }}
-                    placeholder="Ej: C1406 (Caballito)…"
+                {p.seller_profile_id && (
+                  <AddressReadOnly
+                    title="Dirección de retiro"
+                    street={p.pickup_street}
+                    number={p.pickup_number}
+                    city={p.pickup_city}
+                    province={p.pickup_province}
+                    postal={p.pickup_postal}
                   />
-                </Field>
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <Field label="Calle" required>
-                    <Input
-                      value={p.pickup_street}
-                      onChange={(e) =>
-                        updatePickup(i, "pickup_street", e.target.value)
-                      }
-                    />
-                  </Field>
-                  <Field label="Número" required>
-                    <Input
-                      value={p.pickup_number}
-                      onChange={(e) =>
-                        updatePickup(i, "pickup_number", e.target.value)
-                      }
-                    />
-                  </Field>
-                  <Field label="Ciudad">
-                    <Input
-                      value={p.pickup_city}
-                      onChange={(e) =>
-                        updatePickup(i, "pickup_city", e.target.value)
-                      }
-                    />
-                  </Field>
-                  <Field label="Provincia">
-                    <Input
-                      value={p.pickup_province}
-                      onChange={(e) =>
-                        updatePickup(i, "pickup_province", e.target.value)
-                      }
-                    />
-                  </Field>
-                </div>
+                )}
 
                 {/* Paquetes del pickup */}
                 <div className="space-y-2 rounded-md border border-border bg-card p-3">
@@ -707,7 +677,7 @@ export function NewShipmentForm() {
                       .map((i) => `#${i + 1}`)
                       .join(", ")}
                   </span>
-                  . Cambiá el CP o pedile al admin que lo agregue al dataset.
+                  .
                 </p>
               ) : null}
             </div>
@@ -783,6 +753,50 @@ function Field({
       </Label>
       {children}
       {helper && <p className="text-[11px] text-muted-foreground">{helper}</p>}
+    </div>
+  );
+}
+
+/**
+ * Dirección en solo-lectura. Viene de un party real de la DB; no se edita para
+ * garantizar que el pedido use datos existentes y que ciudad/provincia siempre
+ * matcheen el CP.
+ */
+function AddressReadOnly({
+  title,
+  receiver,
+  street,
+  number,
+  apartment,
+  city,
+  province,
+  postal,
+}: {
+  title: string;
+  receiver?: string;
+  street: string;
+  number: string;
+  apartment?: string;
+  city: string;
+  province: string;
+  postal: string;
+}) {
+  const line1 = [street, number].filter(Boolean).join(" ");
+  const line2 = [city, province, postal].filter(Boolean).join(" · ");
+  return (
+    <div className="flex items-start gap-2 rounded-md border border-border bg-muted/30 px-3 py-2">
+      <MapPin className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+      <div className="space-y-0.5 text-sm">
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          {title}
+        </p>
+        {receiver && <p className="font-medium">{receiver}</p>}
+        <p>
+          {line1}
+          {apartment ? `, ${apartment}` : ""}
+        </p>
+        <p className="text-muted-foreground">{line2}</p>
+      </div>
     </div>
   );
 }
