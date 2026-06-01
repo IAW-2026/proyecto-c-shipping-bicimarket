@@ -299,6 +299,23 @@ export default function WikiPage() {
             otros vendedores del mismo pedido.
           </li>
         </ul>
+        <p>
+          El flujo del pedido se dibuja con <strong>un carril por envío</strong>{" "}
+          (cada uno con su progreso real e independiente), y el{" "}
+          <strong>Historial</strong> muestra un timeline por envío. Así, si un
+          envío va más adelante que otro, se ve honestamente: el pedido no
+          figura completo hasta que <em>todos</em> los envíos lleguen a
+          entregado. La <strong>vista envío (TRK)</strong> es el caso particular
+          de un solo carril / un solo timeline.
+        </p>
+        <p>
+          <strong>Entrega parcial:</strong> si un envío del pedido se entregó y
+          otro falló o se devolvió, el pedido muestra el badge{" "}
+          <em>“Entrega parcial”</em> (en vez de un “fallido” plano), para no
+          tapar lo que sí llegó. El operador puede seguir operando los envíos
+          pendientes aunque un hermano del mismo pedido haya fallado, y
+          reintentar el fallido desde su fila.
+        </p>
         <p className="text-sm text-muted-foreground">
           Si una prueba de entrega no tiene foto o la imagen está rota, se
           muestra una imagen de fallback para no romper la UI.

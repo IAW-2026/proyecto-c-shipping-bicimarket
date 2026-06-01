@@ -1,6 +1,6 @@
 // Tipos del API Explorer del admin (/admin/api-docs). El explorer documenta y
 // ejecuta los endpoints S2S que Shipping expone para otras apps. La ejecución
-// pasa por el proxy admin-only POST /api/internal/api-explorer.
+// pasa por el proxy admin-only POST /api/v1/admin/api-explorer.
 
 export type HttpMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 

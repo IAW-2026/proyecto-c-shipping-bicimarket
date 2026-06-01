@@ -1,9 +1,20 @@
 "use client";
 import Link from "next/link";
 import { useState } from "react";
-import { Camera, Check, ChevronRight, Boxes, Package } from "lucide-react";
+import {
+  Camera,
+  Check,
+  ChevronRight,
+  Boxes,
+  Package,
+  RotateCcw,
+  Send,
+  Truck,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/status/StatusBadge";
+import { Spinner } from "@/components/ui/spinner";
+import { useShipmentMutations } from "@/hooks/querys/shipments/useShipmentMutations";
 import { formatWeightKg } from "@/lib/format";
 import { PickupConfirmSheet } from "./PickupConfirmSheet";
 import { DeliveryConfirmSheet } from "./DeliveryConfirmSheet";
@@ -20,11 +31,16 @@ interface OriginPickupRowProps {
  * `/dashboard/shipments/{id}` para que el operador pueda ver el timeline, los
  * paquetes, etc. La acción contextual vive en el lado derecho y depende del
  * estado:
- *   - ready_for_pickup → "Retirado" (abre PickupConfirmSheet)
+ * Cada envío se opera de forma INDEPENDIENTE desde su fila (ADR-006): si un
+ * envío del pedido falla, el operador puede seguir avanzando los demás sin
+ * quedar trabado.
+ *   - ready_for_pickup → "Retirar" (abre PickupConfirmSheet)
+ *   - picked_up        → "En tránsito" (avance directo)
+ *   - in_transit       → "En reparto" (avance directo)
  *   - out_for_delivery → "Entregar" (abre DeliveryConfirmSheet — cada
  *     shipment necesita su propio proof, ADR-005 sprint 1)
- *   - picked_up / in_transit → status pill (el avance bulk vive en el card)
- *   - delivered / failed / returned → status pill + link al detalle
+ *   - failed_delivery  → "Reintentar" (/retry: nuevo envío en el grupo)
+ *   - delivered / returned → status pill + link al detalle
  */
 export function OriginPickupRow({
   assignment,
@@ -118,25 +134,67 @@ function RowAction({
   onOpenPickup: () => void;
   onOpenDeliver: () => void;
 }) {
+  const { addTrackingEvent, retry } = useShipmentMutations(assignment.id);
+  const busy = addTrackingEvent.isPending || retry.isPending;
+  const off = disabled || busy;
+
+  // Avance directo (sin proof) para las transiciones intermedias.
+  function advance(event_type: "in_transit" | "out_for_delivery") {
+    addTrackingEvent.mutate({
+      event_type,
+      occurred_at: new Date().toISOString(),
+    });
+  }
+
   switch (assignment.status) {
     case "ready_for_pickup":
       return (
-        <Button size="sm" disabled={disabled} onClick={onOpenPickup}>
+        <Button size="sm" disabled={off} onClick={onOpenPickup}>
           <Check className="size-4" />
-          Retirado
+          Retirar
+        </Button>
+      );
+    case "picked_up":
+      return (
+        <Button size="sm" disabled={off} onClick={() => advance("in_transit")}>
+          {addTrackingEvent.isPending ? <Spinner /> : <Truck className="size-4" />}
+          En tránsito
+        </Button>
+      );
+    case "in_transit":
+      return (
+        <Button
+          size="sm"
+          disabled={off}
+          onClick={() => advance("out_for_delivery")}
+        >
+          {addTrackingEvent.isPending ? <Spinner /> : <Send className="size-4" />}
+          En reparto
         </Button>
       );
     case "out_for_delivery":
       return (
-        <Button size="sm" disabled={disabled} onClick={onOpenDeliver}>
+        <Button size="sm" disabled={off} onClick={onOpenDeliver}>
           <Camera className="size-4" />
           Entregar
         </Button>
       );
-    case "picked_up":
-    case "in_transit":
-    case "delivered":
     case "failed_delivery":
+      return (
+        <div className="flex flex-col items-end gap-1">
+          <StatusBadge status={assignment.status} size="sm" />
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={off}
+            onClick={() => retry.mutate(undefined)}
+          >
+            {retry.isPending ? <Spinner /> : <RotateCcw className="size-4" />}
+            Reintentar
+          </Button>
+        </div>
+      );
+    case "delivered":
     case "returned":
     case "created":
     default:

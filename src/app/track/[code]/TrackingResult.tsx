@@ -12,6 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorBanner } from "@/components/feedback/ErrorBanner";
 import { EmptyState } from "@/components/feedback/EmptyState";
 import { StatusBadge } from "@/components/status/StatusBadge";
+import { OrderStatusBadge } from "@/components/status/OrderStatusBadge";
 import {
   Carousel,
   CarouselContent,
@@ -19,7 +20,6 @@ import {
   CarouselNext,
   CarouselPrevious,
 } from "@/components/ui/carousel";
-import { ShipmentRouteMap } from "@/components/shipping/ShipmentRouteMap";
 import { OrderShipmentFlow } from "@/components/shipping/OrderShipmentFlow";
 import { TrackingTimeline } from "@/components/shipping/TrackingTimeline";
 import { ProofImage } from "@/components/shipping/ProofImage";
@@ -98,6 +98,17 @@ export function TrackingResult({ code }: TrackingResultProps) {
     data.destination.postal_code,
   );
 
+  const pickups = data.order_pickups;
+  const isMulti = pickups.length > 1;
+  const deliveredCount = pickups.filter((p) => p.status === "delivered").length;
+  // Caption del flujo: multi-vendedor → resumen de entregados; envío único →
+  // distancia aproximada (lo que antes daba el ShipmentRouteMap).
+  const flowCaption = isMulti
+    ? `${pickups.length} envíos → ${data.destination.city} · ${deliveredCount}/${pickups.length} entregado`
+    : km != null
+      ? `≈ ${km} km · ${data.origin.city} → ${data.destination.city}`
+      : `${data.origin.city} → ${data.destination.city}`;
+
   return (
     <div className="space-y-5">
       {/* Header con tracking + status + acciones */}
@@ -134,28 +145,23 @@ export function TrackingResult({ code }: TrackingResultProps) {
               </p>
             )}
           </div>
-          <StatusBadge status={data.status} />
+          {data.view === "order" ? (
+            <OrderStatusBadge
+              statuses={data.order_pickups.map((p) => p.status)}
+            />
+          ) : (
+            <StatusBadge status={data.status} />
+          )}
         </div>
       </header>
 
-      {/* Diagrama del flujo: si es multi-vendedor mostramos el flow consolidado;
-          si no, el ShipmentRouteMap lineal. */}
-      {data.order_pickups && data.order_pickups.length > 1 ? (
-        <OrderShipmentFlow
-          pickups={data.order_pickups}
-          highlightShipmentId={data.shipment_id}
-          caption={`${data.order_pickups.length} vendedores → ${data.destination.city}`}
-        />
-      ) : (
-        <ShipmentRouteMap
-          status={data.status}
-          caption={
-            km != null
-              ? `≈ ${km} km · ${data.origin.city} → ${data.destination.city}`
-              : `${data.origin.city} → ${data.destination.city}`
-          }
-        />
-      )}
+      {/* Flujo del pedido: un carril por envío. La vista ENVÍO (TRK) es el caso
+          particular de 1 carril. */}
+      <OrderShipmentFlow
+        pickups={data.order_pickups}
+        highlightShipmentId={data.shipment_id}
+        caption={flowCaption}
+      />
 
       {/* Resumen + acciones de print */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -198,17 +204,37 @@ export function TrackingResult({ code }: TrackingResultProps) {
           fotos (una por vendedor) → carrusel; vista ENVÍO (TRK) tiene una sola. */}
       <ProofGallery proofs={data.proofs} />
 
-      {/* Timeline */}
+      {/* Historial: un timeline POR ENVÍO. La vista ENVÍO (TRK) es el caso
+          particular de 1 entrada (sin sub-header, se ve igual que antes). */}
       <section className="rounded-xl border border-border bg-card p-4 sm:p-5">
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           Historial
         </h2>
-        <TrackingTimeline
-          events={data.events.map((e, i) => ({
-            id: `${data.shipment_id}-evt-${i}`,
-            ...e,
-          }))}
-        />
+        <div className="space-y-5">
+          {data.order_timelines.map((t, ti) => (
+            <div key={t.shipment_id} className="space-y-2">
+              {data.order_timelines.length > 1 && (
+                <div className="flex items-center justify-between gap-2 border-b border-border/60 pb-1.5">
+                  <div className="leading-tight">
+                    <p className="text-xs font-semibold text-foreground">
+                      Envío {ti + 1}
+                    </p>
+                    <p className="font-mono text-[11px] text-muted-foreground">
+                      {t.tracking_number} · {t.pickup_city}
+                    </p>
+                  </div>
+                  <StatusBadge status={t.status} size="sm" />
+                </div>
+              )}
+              <TrackingTimeline
+                events={t.events.map((e, i) => ({
+                  id: `${t.shipment_id}-evt-${i}`,
+                  ...e,
+                }))}
+              />
+            </div>
+          ))}
+        </div>
       </section>
 
       {/* Acciones (ocultas en print) */}

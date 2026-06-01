@@ -80,12 +80,36 @@ export interface PublicTrackingDTO {
   }>;
 
   /**
+   * ADR-006: historial POR ENVÍO. Una entrada por cada envío del pedido, cada
+   * una con su propio timeline de eventos. En la vista PEDIDO (BMK) hay N
+   * (una por vendedor); en la vista ENVÍO (TRK) hay exactamente UNA (ese
+   * envío). La UI del "Historial" renderiza un timeline por entrada — TRK es
+   * el caso particular de 1 entrada. Reemplaza el uso de `events` (que solo
+   * traía los del envío representante en la vista pedido).
+   */
+  order_timelines: PublicTrackingTimeline[];
+
+  /**
    * Pruebas de entrega. ADR-006: en la vista ENVÍO (TRK) hay como máximo UNA
    * (el envío es atómico). En la vista PEDIDO (BMK) puede haber varias — una
    * por cada vendedor que ya entregó — y la UI las muestra en un carrusel.
    * Vacío si todavía no hay ninguna entrega.
    */
   proofs: PublicTrackingProof[];
+}
+
+export interface PublicTrackingTimeline {
+  shipment_id: string;
+  tracking_number: string;
+  pickup_city: string;
+  seller_profile_id: string;
+  status: ShipmentStatus;
+  events: Array<{
+    event_type: TrackingEventType;
+    location: string | null;
+    note: string | null;
+    occurred_at: string;
+  }>;
 }
 
 export interface PublicTrackingProof {

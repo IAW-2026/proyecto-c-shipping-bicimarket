@@ -19,6 +19,7 @@ import { ApiError, handleApiError } from "@/lib/api-error";
 import type {
   PublicTrackingDTO,
   PublicTrackingProof,
+  PublicTrackingTimeline,
 } from "@/types/public-tracking";
 import type {
   ShipmentStatus,
@@ -112,6 +113,10 @@ export async function GET(
     // ADR-006: la vista PEDIDO junta una prueba por cada vendedor que entregó;
     // la vista ENVÍO tiene a lo sumo una (es atómica).
     let proofs: PublicTrackingProof[];
+    // ADR-006: historial POR ENVÍO. Vista PEDIDO → N entradas (una por
+    // vendedor); vista ENVÍO → 1 entrada (ese envío). El "Historial" del /track
+    // renderiza un timeline por entrada.
+    let orderTimelines: PublicTrackingTimeline[];
 
     if (isOrderView && shipmentGroupId) {
       // Vista PEDIDO: tracking global + estado consolidado + todos los pickups.
@@ -130,6 +135,15 @@ export async function GET(
           deliveryProof: {
             select: { proofPhotoUrl: true, note: true, deliveredAt: true },
           },
+          trackingEvents: {
+            orderBy: { occurredAt: "asc" },
+            select: {
+              eventType: true,
+              location: true,
+              note: true,
+              occurredAt: true,
+            },
+          },
         },
         orderBy: { createdAt: "asc" },
       });
@@ -141,6 +155,22 @@ export async function GET(
           pickup_city: addr.city,
           seller_profile_id: s.sellerProfileId,
           status: s.status as ShipmentStatus,
+        };
+      });
+      orderTimelines = orderShipments.map((s) => {
+        const addr = s.pickupAddressSnapshot as unknown as Address;
+        return {
+          shipment_id: s.id,
+          tracking_number: s.trackingNumber,
+          pickup_city: addr.city,
+          seller_profile_id: s.sellerProfileId,
+          status: s.status as ShipmentStatus,
+          events: s.trackingEvents.map((e) => ({
+            event_type: e.eventType as TrackingEventType,
+            location: e.location,
+            note: e.note,
+            occurred_at: e.occurredAt.toISOString(),
+          })),
         };
       });
       proofs = orderShipments
@@ -165,6 +195,21 @@ export async function GET(
           pickup_city: pickup.city,
           seller_profile_id: shipment.sellerProfileId,
           status: shipment.status as ShipmentStatus,
+        },
+      ];
+      orderTimelines = [
+        {
+          shipment_id: shipment.id,
+          tracking_number: shipment.trackingNumber,
+          pickup_city: pickup.city,
+          seller_profile_id: shipment.sellerProfileId,
+          status: shipment.status as ShipmentStatus,
+          events: shipment.trackingEvents.map((e) => ({
+            event_type: e.eventType as TrackingEventType,
+            location: e.location,
+            note: e.note,
+            occurred_at: e.occurredAt.toISOString(),
+          })),
         },
       ];
       proofs = shipment.deliveryProof
@@ -209,6 +254,7 @@ export async function GET(
         note: e.note,
         occurred_at: e.occurredAt.toISOString(),
       })),
+      order_timelines: orderTimelines,
       proofs,
     };
 

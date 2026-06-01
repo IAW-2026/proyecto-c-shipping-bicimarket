@@ -4,6 +4,7 @@ import {
   addTrackingEvent,
   deliverShipment,
   patchShipmentStatus,
+  retryShipment,
 } from "@/services/api/shipments";
 import type {
   CreateTrackingEventBody,
@@ -26,26 +27,54 @@ export function useShipmentMutations(shipmentId: string) {
   const trackingKey = ["shipments", shipmentId, "tracking"];
   const myAssignmentsKey = ["my-assignments"];
   const adminListKey = ["shipments", "admin"];
+  // ADR-006: el detalle del pedido (useShipmentGroup) cachea bajo
+  // ["shipments","group",code]. Lo invalidamos para que cualquier avance por
+  // fila (retiro / tránsito / reparto / entrega / retry) refresque el grupo.
+  const groupKey = ["shipments", "group"];
 
   return {
     addTrackingEvent: useApiMutation({
       mutationFn: (data: CreateTrackingEventBody) =>
         addTrackingEvent(shipmentId, data),
-      invalidateKeys: [shipmentKey, trackingKey, myAssignmentsKey, adminListKey],
+      invalidateKeys: [
+        shipmentKey,
+        trackingKey,
+        groupKey,
+        myAssignmentsKey,
+        adminListKey,
+      ],
       successMessage: "Evento de tracking registrado",
     }),
 
     deliver: useApiMutation({
       mutationFn: (data: DeliverShipmentBody) =>
         deliverShipment(shipmentId, data),
-      invalidateKeys: [shipmentKey, trackingKey, myAssignmentsKey, adminListKey],
+      invalidateKeys: [
+        shipmentKey,
+        trackingKey,
+        groupKey,
+        myAssignmentsKey,
+        adminListKey,
+      ],
       successMessage: "Envío marcado como entregado",
+    }),
+
+    retry: useApiMutation({
+      mutationFn: () => retryShipment(shipmentId),
+      invalidateKeys: [
+        shipmentKey,
+        trackingKey,
+        groupKey,
+        myAssignmentsKey,
+        adminListKey,
+      ],
+      successMessage: "Reintento creado: nuevo envío listo para retirar",
     }),
 
     patchStatus: useApiMutation({
       mutationFn: (data: PatchShipmentStatusBody) =>
         patchShipmentStatus(shipmentId, data),
-      invalidateKeys: [shipmentKey, myAssignmentsKey, adminListKey],
+      invalidateKeys: [shipmentKey, groupKey, myAssignmentsKey, adminListKey],
       successMessage: "Estado actualizado",
     }),
   };

@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/feedback/EmptyState";
 import { ErrorBanner } from "@/components/feedback/ErrorBanner";
-import { StatusBadge } from "@/components/status/StatusBadge";
+import { OrderStatusBadge } from "@/components/status/OrderStatusBadge";
 import { AddressCard } from "@/components/shipping/AddressCard";
 import { OrderShipmentFlow } from "@/components/shipping/OrderShipmentFlow";
 import { OriginPickupRow } from "@/components/operator/OriginPickupRow";
@@ -95,20 +95,30 @@ export function OrderDetailClient({
     status: s.status,
   }));
 
-  // Avance bulk del flujo consolidado: solo cuando TODOS los envíos están en
-  // picked_up (→ in_transit) o todos en in_transit (→ out_for_delivery). El
-  // delivered final requiere prueba por envío (botón "Entregar" en cada fila).
-  const allPickedUp =
-    shipments.length > 0 && shipments.every((s) => s.status === "picked_up");
-  const allInTransit =
-    shipments.length > 0 && shipments.every((s) => s.status === "in_transit");
-  const bulkAction = allPickedUp
-    ? ({ label: "Marcar todo el pedido en tránsito", event: "in_transit" } as const)
-    : allInTransit
-      ? ({
-          label: "Marcar todo el pedido en reparto",
-          event: "out_for_delivery",
-        } as const)
+  // Avance bulk = atajo para mover varios envíos juntos. Opera solo sobre los
+  // envíos ACTIVOS (ni entregados ni terminados con incidencia), así un envío
+  // entregado/fallido no bloquea avanzar el resto. Cada envío también se puede
+  // avanzar individualmente desde su fila (OriginPickupRow).
+  const activeShipments = shipments.filter(
+    (s) =>
+      s.status !== "delivered" &&
+      s.status !== "returned" &&
+      s.status !== "failed_delivery",
+  );
+  const allActivePickedUp =
+    activeShipments.length > 0 &&
+    activeShipments.every((s) => s.status === "picked_up");
+  const allActiveInTransit =
+    activeShipments.length > 0 &&
+    activeShipments.every((s) => s.status === "in_transit");
+  const bulkScope =
+    activeShipments.length === shipments.length
+      ? "todo el pedido"
+      : `los ${activeShipments.length} envíos restantes`;
+  const bulkAction = allActivePickedUp
+    ? ({ label: `Marcar ${bulkScope} en tránsito`, event: "in_transit" } as const)
+    : allActiveInTransit
+      ? ({ label: `Marcar ${bulkScope} en reparto`, event: "out_for_delivery" } as const)
       : null;
 
   function handleBulk() {
@@ -118,7 +128,7 @@ export function OrderDetailClient({
       occurred_at: new Date().toISOString(),
     };
     bulkAdvanceStatus.mutate({
-      shipmentIds: shipments.map((s) => s.id),
+      shipmentIds: activeShipments.map((s) => s.id),
       body,
     });
   }
@@ -127,6 +137,12 @@ export function OrderDetailClient({
     (s) => s.status === "ready_for_pickup",
   ).length;
   const pickedUp = shipments.length - pendingPickup;
+  const deliveredCount = shipments.filter(
+    (s) => s.status === "delivered",
+  ).length;
+  const problemCount = shipments.filter(
+    (s) => s.status === "failed_delivery" || s.status === "returned",
+  ).length;
   const isMulti = shipments.length > 1;
 
   return (
@@ -150,10 +166,19 @@ export function OrderDetailClient({
             </h1>
             <p className="text-xs text-muted-foreground">
               {isMulti ? `${shipments.length} vendedores · ` : ""}
-              {pickedUp}/{shipments.length} retirados
+              {pickedUp}/{shipments.length} retirados ·{" "}
+              {deliveredCount}/{shipments.length} entregados
             </p>
+            {deliveredCount < shipments.length &&
+              (deliveredCount > 0 || problemCount > 0) && (
+                <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                  {problemCount > 0
+                    ? `${deliveredCount} entregado · ${problemCount} necesita atención (reintentar o devolver).`
+                    : `Falta entregar ${shipments.length - deliveredCount} de ${shipments.length} envíos para completar el pedido.`}
+                </p>
+              )}
           </div>
-          <StatusBadge status={aggregate.rollup_status} />
+          <OrderStatusBadge statuses={shipments.map((s) => s.status)} />
         </div>
       </header>
 
@@ -162,7 +187,7 @@ export function OrderDetailClient({
       {/* Flujo consolidado del pedido */}
       <OrderShipmentFlow
         pickups={pickups}
-        caption={`${isMulti ? `${shipments.length} vendedores` : "1 vendedor"} → ${aggregate.shipping_address.city}`}
+        caption={`${isMulti ? `${shipments.length} envíos` : "1 envío"} → ${aggregate.shipping_address.city} · ${deliveredCount}/${shipments.length} entregado`}
       />
 
       {/* Dirección de entrega del pedido */}
@@ -178,8 +203,9 @@ export function OrderDetailClient({
           Envíos del pedido ({shipments.length})
         </h2>
         <p className="text-[11px] text-muted-foreground">
-          Retirá cada envío en su origen. Cuando estén todos retirados, avanzá
-          el pedido completo de una.
+          Avanzá cada envío desde su fila (retiro → tránsito → reparto →
+          entrega). Si varios están alineados, podés moverlos juntos con el
+          botón de abajo. Un envío fallido no bloquea avanzar el resto.
         </p>
         <ul className="space-y-2">
           {shipments.map((s) => (

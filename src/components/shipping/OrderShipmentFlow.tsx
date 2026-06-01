@@ -14,35 +14,30 @@ import "@xyflow/react/dist/style.css";
 import {
   Check,
   Home,
-  MapPin,
   Package as PackageIcon,
   RefreshCcw,
   Truck,
   XCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { rollupShipmentStatus } from "@/lib/shipment-rollup";
+import { SHIPMENT_STATUS_STYLES } from "@/lib/status-styles";
 import type { OrderPickupSummary, ShipmentStatus } from "@/types/shipments";
 
-// ADR-005: diagrama de flujo de un pedido multi-vendedor.
+// ADR-006: diagrama de flujo de un pedido. Un CARRIL por envío (shipment).
 //
-// Layout:
-//   [pickup A] ─┐
-//   [pickup B] ─┼─→ [retirado] ─→ [tránsito] ─→ [reparto] ─→ [entregado]
-//   [pickup C] ─┘
+// Layout (un carril por envío, cada uno con su progreso REAL e independiente):
 //
-// Cada pickup_i refleja el estado individual de su shipment:
-//   - state=current   → ready_for_pickup (parpadea)
-//   - state=done      → picked_up o más adelante
-// El nodo "retirado" se ilumina solo cuando TODOS los pickups están done.
-// Después del retirado, el flujo es consolidado: se usa el rollup_status
-// del pedido para colorear in_transit / out_for_delivery / delivered.
+//   Envío 1 · TRK-…   ●──────●──────●──────●   (su propio estado)
+//                    Retiro Tráns. Reparto Entreg.
+//   Envío 2 · TRK-…   ●──────●──────○──────○
+//
+// Cada carril se colorea con el estado individual de SU shipment (no con el
+// rollup del pedido), así que cuando los envíos divergen (uno entregado, otro
+// no) la UI lo muestra honestamente: el pedido no está completo hasta que TODOS
+// los carriles lleguen a "Entregado". El caso de un solo envío (vista TRK) es
+// simplemente un pedido de 1 carril.
 
-type StageKey =
-  | "picked_up"
-  | "in_transit"
-  | "out_for_delivery"
-  | "delivered";
+type StageKey = "picked_up" | "in_transit" | "out_for_delivery" | "delivered";
 
 interface StageDef {
   key: StageKey;
@@ -50,29 +45,30 @@ interface StageDef {
   icon: typeof PackageIcon;
 }
 
-const CONSOLIDATED_STAGES: StageDef[] = [
-  { key: "picked_up", label: "Retirado", icon: PackageIcon },
-  { key: "in_transit", label: "En tránsito", icon: Truck },
-  { key: "out_for_delivery", label: "En reparto", icon: Truck },
+const STAGES: StageDef[] = [
+  { key: "picked_up", label: "Retiro", icon: PackageIcon },
+  { key: "in_transit", label: "Tránsito", icon: Truck },
+  { key: "out_for_delivery", label: "Reparto", icon: Truck },
   { key: "delivered", label: "Entregado", icon: Home },
 ];
 
+// Índice del estado individual de un envío dentro de la secuencia de stages.
+//   -1 = todavía no retirado (ready_for_pickup / created)
 function progressIndex(status: ShipmentStatus): number {
   switch (status) {
     case "created":
     case "ready_for_pickup":
-      return -1; // antes de consolidar
+      return -1;
     case "picked_up":
       return 0;
     case "in_transit":
       return 1;
     case "out_for_delivery":
     case "failed_delivery":
+    case "returned":
       return 2;
     case "delivered":
       return 3;
-    case "returned":
-      return 2;
     default:
       return -1;
   }
@@ -82,34 +78,47 @@ function isFailed(status: ShipmentStatus): boolean {
   return status === "failed_delivery" || status === "returned";
 }
 
-function isPickedUpOrBeyond(status: ShipmentStatus): boolean {
-  return (
-    status === "picked_up" ||
-    status === "in_transit" ||
-    status === "out_for_delivery" ||
-    status === "delivered" ||
-    status === "failed_delivery" ||
-    status === "returned"
-  );
+type StageState = "done" | "current" | "pending" | "failed";
+
+// Estado visual de cada uno de los 4 stages para el status de UN envío.
+function stageStatesFor(status: ShipmentStatus): StageState[] {
+  const p = progressIndex(status);
+  const failed = isFailed(status);
+  return STAGES.map((_, j) => {
+    if (failed) {
+      // Los stages alcanzados quedan "done"; el terminal (Entregado) se marca
+      // como "failed" (entrega fallida / devuelto).
+      if (j < 3) return "done";
+      return "failed";
+    }
+    if (j <= p) return "done";
+    if (j === p + 1) return "current";
+    return "pending";
+  });
 }
 
 // ── Nodes ─────────────────────────────────────────────────────────────────
 
-interface PickupNodeData {
-  label: string;
+interface LaneLabelData {
+  title: string;
   trackingNumber: string;
-  state: "done" | "current" | "pending" | "neutral";
+  city: string;
+  statusLabel: string;
+  failed: boolean;
   [key: string]: unknown;
 }
 
 interface StageNodeData {
   label: string;
   icon: typeof PackageIcon;
-  state: "done" | "current" | "pending" | "neutral";
+  state: StageState;
   [key: string]: unknown;
 }
 
-const STATE_STYLES = {
+const STATE_STYLES: Record<
+  StageState,
+  { ring: string; bg: string; label: string }
+> = {
   done: {
     ring: "ring-2 ring-primary/30",
     bg: "bg-primary text-primary-foreground",
@@ -125,43 +134,29 @@ const STATE_STYLES = {
     bg: "bg-muted text-muted-foreground",
     label: "text-muted-foreground",
   },
-  neutral: {
-    ring: "ring-1 ring-border",
-    bg: "bg-muted text-muted-foreground/60",
-    label: "text-muted-foreground/70",
+  failed: {
+    ring: "ring-2 ring-destructive/30",
+    bg: "bg-destructive/15 text-destructive",
+    label: "text-destructive",
   },
-} as const;
+};
 
-function PickupNode({ data }: NodeProps<Node<PickupNodeData>>) {
-  const styles = STATE_STYLES[data.state];
+function LaneLabelNode({ data }: NodeProps<Node<LaneLabelData>>) {
   return (
-    <div className="flex max-w-[140px] flex-col items-center gap-1">
-      <div
+    <div className="w-[150px] leading-tight">
+      <p className="text-[11px] font-semibold text-foreground">{data.title}</p>
+      <p className="truncate font-mono text-[10px] text-muted-foreground">
+        {data.trackingNumber}
+      </p>
+      <p className="truncate text-[10px] text-muted-foreground">{data.city}</p>
+      <p
         className={cn(
-          "flex size-9 items-center justify-center rounded-full shadow-sm transition-all",
-          styles.bg,
-          styles.ring,
+          "mt-0.5 text-[10px] font-medium",
+          data.failed ? "text-destructive" : "text-primary",
         )}
       >
-        {data.state === "done" ? (
-          <Check className="size-4" strokeWidth={2.5} />
-        ) : (
-          <MapPin className="size-4" />
-        )}
-      </div>
-      <div className="text-center leading-tight">
-        <p className={cn("text-[10px] font-medium", styles.label)}>
-          {data.label}
-        </p>
-        <p className="font-mono text-[9px] text-muted-foreground">
-          {data.trackingNumber}
-        </p>
-      </div>
-      <Handle
-        type="source"
-        position={Position.Right}
-        className="!h-1 !w-1 !border-0 !bg-transparent"
-      />
+        {data.statusLabel}
+      </p>
     </div>
   );
 }
@@ -178,13 +173,13 @@ function StageNode({ data }: NodeProps<Node<StageNodeData>>) {
       />
       <div
         className={cn(
-          "flex size-10 items-center justify-center rounded-full shadow-sm transition-all",
+          "flex size-9 items-center justify-center rounded-full shadow-sm transition-all",
           styles.bg,
           styles.ring,
         )}
       >
         {data.state === "done" ? (
-          <Check className="size-5" strokeWidth={2.5} />
+          <Check className="size-4" strokeWidth={2.5} />
         ) : (
           <Icon className="size-4" />
         )}
@@ -201,14 +196,15 @@ function StageNode({ data }: NodeProps<Node<StageNodeData>>) {
   );
 }
 
-const nodeTypes = { pickup: PickupNode, stage: StageNode };
+const nodeTypes = { laneLabel: LaneLabelNode, stage: StageNode };
 
 // ── Layout constants ──────────────────────────────────────────────────────
 
-const PICKUP_X = 0;
-const STAGE_X_START = 200;
-const STAGE_GAP = 130;
-const PICKUP_Y_GAP = 70;
+const LABEL_X = 0;
+const STAGE_X_START = 175;
+const STAGE_GAP = 115;
+const LANE_GAP = 92;
+const STAGE_Y_OFFSET = 4; // centra el círculo respecto del bloque de label
 
 // ── Componente principal ──────────────────────────────────────────────────
 
@@ -218,7 +214,7 @@ interface OrderShipmentFlowProps {
   className?: string;
   /** Acción opcional para mostrar al pie del banner de fallo. */
   failureAction?: React.ReactNode;
-  /** Si está seteado, el pickup del shipmentId actual se destaca con border. */
+  /** Si está seteado, el carril de ese shipment se destaca con un borde. */
   highlightShipmentId?: string;
 }
 
@@ -229,12 +225,12 @@ export function OrderShipmentFlow({
   failureAction,
   highlightShipmentId,
 }: OrderShipmentFlowProps) {
-  const rollup = useMemo(
-    () => rollupShipmentStatus(pickups.map((p) => p.status)),
-    [pickups],
-  );
-  const failed = isFailed(rollup);
-  const consolidatedProgress = progressIndex(rollup);
+  const hasReturned = pickups.some((p) => p.status === "returned");
+  const hasFailed = pickups.some((p) => p.status === "failed_delivery");
+  const showFailureBanner = hasReturned || hasFailed;
+  const deliveredCount = pickups.filter((p) => p.status === "delivered").length;
+  // Entrega parcial: algún envío ya entregado + algún otro fallido/devuelto.
+  const partial = deliveredCount > 0 && showFailureBanner;
 
   const { nodes, edges, height } = useMemo<{
     nodes: Node[];
@@ -244,116 +240,99 @@ export function OrderShipmentFlow({
     const n: Node[] = [];
     const e: Edge[] = [];
 
-    // Vertical center for stages relative to the vertical stack of pickups.
-    const pickupCount = pickups.length;
-    const totalPickupH = Math.max(1, pickupCount - 1) * PICKUP_Y_GAP;
-    const centerY = totalPickupH / 2;
+    pickups.forEach((pickup, laneIdx) => {
+      const laneY = laneIdx * LANE_GAP;
+      const states = stageStatesFor(pickup.status);
+      const failed = isFailed(pickup.status);
+      const statusLabel =
+        SHIPMENT_STATUS_STYLES[pickup.status]?.label ?? pickup.status;
 
-    // Pickup nodes
-    pickups.forEach((pickup, i) => {
-      let state: PickupNodeData["state"];
-      if (failed) {
-        state = "neutral";
-      } else if (isPickedUpOrBeyond(pickup.status)) {
-        state = "done";
-      } else if (pickup.status === "ready_for_pickup") {
-        state = "current";
-      } else {
-        state = "pending";
-      }
-
+      // Label del carril (anotación a la izquierda).
       n.push({
-        id: `pickup-${pickup.shipment_id}`,
-        type: "pickup",
-        position: { x: PICKUP_X, y: i * PICKUP_Y_GAP },
+        id: `s${pickup.shipment_id}-label`,
+        type: "laneLabel",
+        position: { x: LABEL_X, y: laneY },
         data: {
-          label: pickup.pickup_city,
+          title: `Envío ${laneIdx + 1}`,
           trackingNumber: pickup.tracking_number,
-          state,
-        } satisfies PickupNodeData,
+          city: pickup.pickup_city,
+          statusLabel,
+          failed,
+        } satisfies LaneLabelData,
         draggable: false,
         selectable: false,
-        // outline para destacar el pickup actual
         ...(pickup.shipment_id === highlightShipmentId && {
-          style: { outline: "2px dashed var(--primary)", borderRadius: 12 },
+          style: {
+            outline: "2px dashed var(--primary)",
+            borderRadius: 8,
+            padding: 4,
+          },
         }),
       });
-    });
 
-    // Consolidated stages
-    CONSOLIDATED_STAGES.forEach((stage, i) => {
-      let state: StageNodeData["state"];
-      if (failed) {
-        state = "neutral";
-      } else if (i < consolidatedProgress) {
-        state = "done";
-      } else if (i === consolidatedProgress) {
-        state = "done";
-      } else if (i === consolidatedProgress + 1) {
-        state = "pending";
-      } else {
-        state = "pending";
-      }
-      // Estado "current" → marcamos el que coincide con el rollup
-      if (!failed && stage.key === rollup) {
-        state = consolidatedProgress === 0 && pickupCount > 1 ? "done" : "current";
-      }
+      // 4 stages del carril.
+      STAGES.forEach((stage, j) => {
+        const state = states[j];
+        const icon =
+          stage.key === "delivered" && failed
+            ? hasReturned && pickup.status === "returned"
+              ? RefreshCcw
+              : XCircle
+            : stage.icon;
+        n.push({
+          id: `s${pickup.shipment_id}-stage-${stage.key}`,
+          type: "stage",
+          position: {
+            x: STAGE_X_START + j * STAGE_GAP,
+            y: laneY + STAGE_Y_OFFSET,
+          },
+          data: { label: stage.label, icon, state } satisfies StageNodeData,
+          draggable: false,
+          selectable: false,
+        });
+      });
 
-      n.push({
-        id: `stage-${stage.key}`,
-        type: "stage",
-        position: { x: STAGE_X_START + i * STAGE_GAP, y: centerY },
-        data: { label: stage.label, icon: stage.icon, state } satisfies StageNodeData,
-        draggable: false,
-        selectable: false,
+      // Edges entre stages del carril.
+      STAGES.slice(0, -1).forEach((stage, j) => {
+        const from = states[j];
+        const to = states[j + 1];
+        let stroke = "var(--border)";
+        let width = 1.5;
+        let dash: string | undefined = "4 4";
+        let animated = false;
+        if (to === "failed") {
+          stroke = "var(--destructive)";
+          width = 2;
+          dash = undefined;
+        } else if (from === "done" && to === "done") {
+          stroke = "var(--primary)";
+          width = 2;
+          dash = undefined;
+        } else if (to === "current") {
+          stroke = "var(--primary)";
+          width = 2;
+          dash = undefined;
+          animated = true;
+        }
+        e.push({
+          id: `s${pickup.shipment_id}-${stage.key}-${STAGES[j + 1].key}`,
+          source: `s${pickup.shipment_id}-stage-${stage.key}`,
+          target: `s${pickup.shipment_id}-stage-${STAGES[j + 1].key}`,
+          animated,
+          style: { stroke, strokeWidth: width, strokeDasharray: dash },
+          type: "smoothstep",
+        });
       });
     });
 
-    // Edges: cada pickup → "picked_up". Done si su shipment está picked_up o más.
-    pickups.forEach((pickup) => {
-      const isPickupDone = !failed && isPickedUpOrBeyond(pickup.status);
-      e.push({
-        id: `pickup-${pickup.shipment_id}-to-picked_up`,
-        source: `pickup-${pickup.shipment_id}`,
-        target: "stage-picked_up",
-        animated: !failed && pickup.status === "ready_for_pickup",
-        style: {
-          stroke: isPickupDone ? "var(--primary)" : "var(--border)",
-          strokeWidth: isPickupDone ? 2 : 1.5,
-          strokeDasharray: isPickupDone ? undefined : "4 4",
-          opacity: failed ? 0.5 : 1,
-        },
-        type: "smoothstep",
-      });
-    });
+    return {
+      nodes: n,
+      edges: e,
+      height: Math.max(150, pickups.length * LANE_GAP + 40),
+    };
+  }, [pickups, highlightShipmentId, hasReturned]);
 
-    // Edges entre stages consolidadas
-    CONSOLIDATED_STAGES.slice(0, -1).forEach((stage, i) => {
-      const isPast = !failed && i < consolidatedProgress;
-      const isCurrentTransition = !failed && i === consolidatedProgress;
-      e.push({
-        id: `${stage.key}-to-${CONSOLIDATED_STAGES[i + 1].key}`,
-        source: `stage-${stage.key}`,
-        target: `stage-${CONSOLIDATED_STAGES[i + 1].key}`,
-        animated: isCurrentTransition,
-        style: {
-          stroke:
-            isPast || isCurrentTransition
-              ? "var(--primary)"
-              : "var(--border)",
-          strokeWidth: isPast || isCurrentTransition ? 2 : 1.5,
-          strokeDasharray:
-            isPast || isCurrentTransition ? undefined : "4 4",
-          opacity: failed ? 0.5 : 1,
-        },
-        type: "smoothstep",
-      });
-    });
-
-    return { nodes: n, edges: e, height: Math.max(180, totalPickupH + 100) };
-  }, [pickups, failed, consolidatedProgress, rollup, highlightShipmentId]);
-
-  const fitViewOptions: ReactFlowProps["fitViewOptions"] = { padding: 0.2 };
+  const fitViewOptions: ReactFlowProps["fitViewOptions"] = { padding: 0.15 };
 
   return (
     <div
@@ -367,7 +346,7 @@ export function OrderShipmentFlow({
           {caption}
         </div>
       )}
-      <div style={{ height }} className="min-h-[180px]">
+      <div style={{ height }} className="min-h-[150px]">
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -387,10 +366,26 @@ export function OrderShipmentFlow({
         </ReactFlow>
       </div>
 
-      {failed && (
+      {partial ? (
+        <div className="flex flex-wrap items-center gap-3 border-t border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
+          <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400">
+            <Truck className="size-3.5" />
+          </span>
+          <div className="flex-1 leading-tight">
+            <p className="text-sm font-semibold text-amber-700 dark:text-amber-400">
+              Entrega parcial · {deliveredCount}/{pickups.length} entregado
+            </p>
+            <p className="text-[11px] text-amber-700/80 dark:text-amber-400/80">
+              Parte del pedido se entregó. El resto necesita atención
+              (reintentar o devolver) antes de completar el pedido.
+            </p>
+          </div>
+          {failureAction && <div className="shrink-0">{failureAction}</div>}
+        </div>
+      ) : showFailureBanner ? (
         <div className="flex flex-wrap items-center gap-3 border-t border-destructive/30 bg-destructive/10 px-3 py-2.5">
           <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-destructive/15 text-destructive">
-            {rollup === "returned" ? (
+            {hasReturned ? (
               <RefreshCcw className="size-3.5" />
             ) : (
               <XCircle className="size-3.5" />
@@ -398,17 +393,17 @@ export function OrderShipmentFlow({
           </span>
           <div className="flex-1 leading-tight">
             <p className="text-sm font-semibold text-destructive">
-              {rollup === "returned" ? "Pedido devuelto" : "Entrega fallida"}
+              {hasReturned ? "Pedido con devolución" : "Entrega fallida"}
             </p>
             <p className="text-[11px] text-destructive/80">
-              {rollup === "returned"
+              {hasReturned
                 ? "Alguno de los envíos del pedido se devolvió tras no poder entregarse."
-                : "Alguno de los envíos del pedido no se pudo entregar. Mirá el detalle de cada pickup para reintentar."}
+                : "Alguno de los envíos del pedido no se pudo entregar. Mirá el detalle de cada envío para reintentar."}
             </p>
           </div>
           {failureAction && <div className="shrink-0">{failureAction}</div>}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

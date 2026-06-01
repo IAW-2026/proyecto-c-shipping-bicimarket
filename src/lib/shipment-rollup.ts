@@ -34,3 +34,19 @@ export function rollupShipmentStatus(
     statuses[0],
   );
 }
+
+/**
+ * Estado DERIVADO de UI (no vive en la DB): el pedido está en "entrega parcial"
+ * cuando al menos un envío ya se entregó Y al menos otro falló o se devolvió.
+ * En ese caso el rollup de la DB queda en `failed_delivery`/`returned` (por
+ * prioridad de atención), pero a nivel pedido conviene comunicar que parte SÍ
+ * llegó. La decisión fue resolverlo solo en la UI, sin tocar el enum ni la
+ * máquina de estados. Ver `OrderStatusBadge` y `OrderShipmentFlow`.
+ */
+export function isPartialDelivery(statuses: ShipmentStatus[]): boolean {
+  const delivered = statuses.filter((s) => s === "delivered").length;
+  const problem = statuses.filter(
+    (s) => s === "failed_delivery" || s === "returned",
+  ).length;
+  return delivered > 0 && problem > 0;
+}

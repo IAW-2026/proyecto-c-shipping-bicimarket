@@ -3,7 +3,6 @@ import { useState } from "react";
 import { Play, AlertCircle } from "lucide-react";
 import type { EndpointSpec, HttpMethod } from "@/types/api-explorer";
 import { useApiExplorer } from "@/hooks/querys/api-explorer/useApiExplorer";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
