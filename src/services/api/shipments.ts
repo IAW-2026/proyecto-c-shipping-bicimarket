@@ -29,6 +29,17 @@ export async function getShipment(shipmentId: string): Promise<ShipmentDTO> {
   return res.data;
 }
 
+// ADR-006: detalle del pedido completo (grupo). `code` acepta el grp_… o el
+// tracking global BMK-…. Lo consume la vista detalle del operador.
+export async function getShipmentGroup(
+  code: string,
+): Promise<ShipmentGroupDTO> {
+  const res = await api.get<ShipmentGroupDTO>(
+    `/v1/shipment-groups/${encodeURIComponent(code)}`,
+  );
+  return res.data;
+}
+
 export async function listShipmentsAdmin(
   filters: ShipmentsAdminFilters,
   page: number,

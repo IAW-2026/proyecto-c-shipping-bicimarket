@@ -9,7 +9,6 @@ import { ErrorBanner } from "@/components/feedback/ErrorBanner";
 import { AddressCard } from "@/components/shipping/AddressCard";
 import { TrackingTimeline } from "@/components/shipping/TrackingTimeline";
 import { ShipmentRouteMap } from "@/components/shipping/ShipmentRouteMap";
-import { OrderShipmentFlow } from "@/components/shipping/OrderShipmentFlow";
 import { DeliveryProofCard } from "@/components/shipping/DeliveryProofCard";
 import { TransitionButton } from "@/components/operator/TransitionButton";
 import { OperatorStatusBanner } from "@/components/operator/OperatorStatusBanner";
@@ -119,25 +118,26 @@ export function OperatorShipmentDetail({
       {/* Banner si el operador está suspended/inactive */}
       <OperatorStatusBanner status={operatorStatus} />
 
-      {/* ADR-006: banner cuando el envío es parte de un pedido multi-vendedor */}
+      {/* ADR-006: este es el flujo de UN envío (un vendedor). El pedido
+          completo (todos los vendedores + avance consolidado) vive en la vista
+          del pedido. */}
       {isMultiOrigin && (
         <div className="flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/10 p-3 text-xs text-foreground">
           <Info className="mt-0.5 size-4 shrink-0 text-primary" />
           <div className="space-y-1">
             <p>
-              Estás viendo el envío de un vendedor. Vos gestionás el{" "}
-              <strong>pedido completo</strong> (
+              Estás viendo el envío de <strong>un</strong> vendedor. Es parte
+              del pedido{" "}
               <span className="font-mono">
                 {shipment.order_tracking_number}
-              </span>
-              ) — <strong>{orderPickups.length}</strong> vendedores. El flujo de
-              abajo muestra todos los retiros y el estado consolidado.
+              </span>{" "}
+              (<strong>{orderPickups.length}</strong> vendedores).
             </p>
             <Link
-              href="/dashboard/assignments"
+              href={`/dashboard/orders/${encodeURIComponent(shipment.order_tracking_number)}`}
               className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
             >
-              Volver a mis pedidos
+              Abrir el pedido completo
               <ChevronLeft className="size-3 rotate-180" />
             </Link>
           </div>
@@ -166,43 +166,34 @@ export function OperatorShipmentDetail({
         )}
       </div>
 
-      {/* Diagrama de flujo: si es multi-vendedor mostramos el flow consolidado,
-          si no, el ShipmentRouteMap lineal de siempre. */}
-      {isMultiOrigin ? (
-        <OrderShipmentFlow
-          pickups={orderPickups}
-          highlightShipmentId={shipment.id}
-          caption={`Pedido · ${shipment.shipping_address_snapshot.city} · ${orderPickups.length} orígenes`}
-        />
-      ) : (
-        <ShipmentRouteMap
-          status={shipment.status}
-          caption={(() => {
-            const km = distanceBetweenPostalCodes(
-              shipment.pickup_address_snapshot.postal_code,
-              shipment.shipping_address_snapshot.postal_code,
-            );
-            return km != null
-              ? `≈ ${km} km · ${shipment.pickup_address_snapshot.city} → ${shipment.shipping_address_snapshot.city}`
-              : `${shipment.pickup_address_snapshot.city} → ${shipment.shipping_address_snapshot.city}`;
-          })()
+      {/* ADR-006: el detalle de un envío muestra SOLO el flujo de ese envío
+          (un vendedor). El flujo consolidado del pedido vive en /dashboard/orders. */}
+      <ShipmentRouteMap
+        status={shipment.status}
+        caption={(() => {
+          const km = distanceBetweenPostalCodes(
+            shipment.pickup_address_snapshot.postal_code,
+            shipment.shipping_address_snapshot.postal_code,
+          );
+          return km != null
+            ? `≈ ${km} km · ${shipment.pickup_address_snapshot.city} → ${shipment.shipping_address_snapshot.city}`
+            : `${shipment.pickup_address_snapshot.city} → ${shipment.shipping_address_snapshot.city}`;
+        })()}
+        failureAction={
+          shipment.status === "failed_delivery" ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleRetry}
+              disabled={actionsBlocked || retry.isPending}
+              className="border-destructive/40 text-destructive hover:bg-destructive/15"
+            >
+              <RefreshCcw className="size-3.5" />
+              {retry.isPending ? "Creando…" : "Crear nuevo envío"}
+            </Button>
+          ) : null
         }
-          failureAction={
-            shipment.status === "failed_delivery" ? (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleRetry}
-                disabled={actionsBlocked || retry.isPending}
-                className="border-destructive/40 text-destructive hover:bg-destructive/15"
-              >
-                <RefreshCcw className="size-3.5" />
-                {retry.isPending ? "Creando…" : "Crear nuevo envío"}
-              </Button>
-            ) : null
-          }
-        />
-      )}
+      />
 
       {/* Direcciones */}
       <div className="space-y-3">

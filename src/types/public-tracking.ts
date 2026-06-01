@@ -18,9 +18,15 @@ import type { TrackingEventType } from "./tracking-events";
  */
 export interface PublicTrackingDTO {
   /**
-   * El código que el usuario buscó y que se muestra como título. Si buscó por
-   * el global del pedido (`BMK-…`) coincide con `order_tracking_number`; si
-   * buscó por el de un envío individual de un vendedor, es ese `TRK-AR-…`.
+   * ADR-006: qué vista es. `order` = el comprador buscó por el código global
+   * del pedido (`BMK-…`) → ve el pedido completo (todos los vendedores).
+   * `shipment` = se buscó por el código de un envío individual (`TRK-AR-…`) →
+   * se ve SOLO ese envío (un vendedor no ve los de otros vendedores).
+   */
+  view: "order" | "shipment";
+  /**
+   * El código que el usuario buscó y que se muestra como título. En vista
+   * `order` es el `BMK-…`; en vista `shipment` es el `TRK-AR-…`.
    */
   tracking_number: string;
   /**

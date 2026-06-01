@@ -42,22 +42,33 @@ export async function GET(
     // representante. Si es individual ("TRK-AR-…" o "shp_…"), resolvemos ese
     // envío. En ambos casos el order_tracking_number sale del grupo.
     const upper = trimmed.toUpperCase();
-    const isGroupCode = upper.startsWith("BMK-") || trimmed.startsWith("grp_");
+    // ADR-006: dos vistas según el código:
+    //  - VISTA PEDIDO (comprador): el código es el global "BMK-…" (o "grp_…").
+    //    Muestra el pedido completo: todos los envíos de todos los vendedores +
+    //    el estado consolidado (rollup) del pedido.
+    //  - VISTA ENVÍO (vendedor): el código es el individual "TRK-AR-…" (o
+    //    "shp_…"). Muestra SOLO ese envío — un vendedor no ve los envíos de
+    //    otros vendedores del mismo pedido (aislamiento).
+    const isOrderView = upper.startsWith("BMK-") || trimmed.startsWith("grp_");
 
     let shipmentGroupId: string | null = null;
-    if (isGroupCode) {
+    let groupStatus: ShipmentStatus | null = null;
+    let groupTrackingNumber: string | null = null;
+    if (isOrderView) {
       const group = await prisma.shipmentGroup.findFirst({
         where: { OR: [{ id: trimmed }, { trackingNumber: upper }] },
-        select: { id: true },
+        select: { id: true, status: true, trackingNumber: true },
       });
       if (!group) {
         throw new ApiError(
           "TRACKING_NOT_FOUND",
           404,
-          "No encontramos un envío con ese código",
+          "No encontramos un pedido con ese código",
         );
       }
       shipmentGroupId = group.id;
+      groupStatus = group.status as ShipmentStatus;
+      groupTrackingNumber = group.trackingNumber;
     }
 
     const shipment = await prisma.shipment.findFirst({
@@ -69,7 +80,6 @@ export async function GET(
         packages: { select: { id: true } },
         trackingEvents: { orderBy: { occurredAt: "asc" } },
         deliveryProof: true,
-        group: { select: { trackingNumber: true } },
       },
     });
 
@@ -92,47 +102,63 @@ export async function GET(
       postal_code: string;
     };
 
-    // Tracking a devolver como "principal": si el código era el individual de
-    // un vendedor, ese; si era el global (BMK-/grp_) o el shipment_id,
-    // devolvemos el global del pedido (más amigable para el comprador).
-    const matchedByIndividual = !isGroupCode && shipment.trackingNumber === upper;
-    const trackingToReturn = matchedByIndividual
-      ? shipment.trackingNumber
-      : shipment.group.trackingNumber;
+    let trackingToReturn: string;
+    let orderTrackingToReturn: string;
+    let statusToReturn: ShipmentStatus;
+    let orderPickups: OrderPickupSummary[];
 
-    // ADR-006: hidratamos TODOS los pickups del pedido (mismo grupo) para que
-    // la UI pueda renderizar el flow multi-vendedor sin round-trips extra.
-    const orderShipments = await prisma.shipment.findMany({
-      where: { shipmentGroupId: shipment.shipmentGroupId },
-      select: {
-        id: true,
-        trackingNumber: true,
-        sellerProfileId: true,
-        status: true,
-        pickupAddressSnapshot: true,
-        createdAt: true,
-      },
-      orderBy: { createdAt: "asc" },
-    });
-
-    const orderPickups: OrderPickupSummary[] = orderShipments.map((s) => {
-      const addr = s.pickupAddressSnapshot as unknown as Address;
-      return {
-        shipment_id: s.id,
-        tracking_number: s.trackingNumber,
-        pickup_city: addr.city,
-        seller_profile_id: s.sellerProfileId,
-        status: s.status as ShipmentStatus,
-      };
-    });
+    if (isOrderView && shipmentGroupId) {
+      // Vista PEDIDO: tracking global + estado consolidado + todos los pickups.
+      trackingToReturn = groupTrackingNumber as string;
+      orderTrackingToReturn = groupTrackingNumber as string;
+      statusToReturn = (groupStatus ?? (shipment.status as ShipmentStatus));
+      const orderShipments = await prisma.shipment.findMany({
+        where: { shipmentGroupId },
+        select: {
+          id: true,
+          trackingNumber: true,
+          sellerProfileId: true,
+          status: true,
+          pickupAddressSnapshot: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: "asc" },
+      });
+      orderPickups = orderShipments.map((s) => {
+        const addr = s.pickupAddressSnapshot as unknown as Address;
+        return {
+          shipment_id: s.id,
+          tracking_number: s.trackingNumber,
+          pickup_city: addr.city,
+          seller_profile_id: s.sellerProfileId,
+          status: s.status as ShipmentStatus,
+        };
+      });
+    } else {
+      // Vista ENVÍO: solo este envío. No exponemos el pedido ni los otros
+      // vendedores — el vendedor ve únicamente su propio flujo.
+      trackingToReturn = shipment.trackingNumber;
+      orderTrackingToReturn = shipment.trackingNumber;
+      statusToReturn = shipment.status as ShipmentStatus;
+      orderPickups = [
+        {
+          shipment_id: shipment.id,
+          tracking_number: shipment.trackingNumber,
+          pickup_city: pickup.city,
+          seller_profile_id: shipment.sellerProfileId,
+          status: shipment.status as ShipmentStatus,
+        },
+      ];
+    }
 
     const dto: PublicTrackingDTO = {
+      view: isOrderView ? "order" : "shipment",
       tracking_number: trackingToReturn,
-      order_tracking_number: shipment.group.trackingNumber,
+      order_tracking_number: orderTrackingToReturn,
       order_pickups_count: orderPickups.length,
       order_pickups: orderPickups,
       shipment_id: shipment.id,
-      status: shipment.status as ShipmentStatus,
+      status: statusToReturn,
       carrier: shipment.carrier,
       service_level: shipment.serviceLevel as ServiceLevel,
       origin: {
