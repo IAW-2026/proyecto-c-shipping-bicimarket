@@ -35,9 +35,9 @@ Todos los usuarios usan la contraseña **`iawuser#`**.
    con su código `BMK-…`. Podés copiar uno desde el detalle de un envío en el panel admin.
 5. **Documentación interactiva de la API** (como admin, en `/admin/api-docs`): una página
    tipo Swagger que documenta el contrato REST que Shipping **expone para las otras apps**
-   (cotizaciones, envíos, paquetes, tracking events) con un formulario para **ejecutar cada
-   endpoint en vivo**. El secreto `X-Service-Token` se inyecta del lado del servidor vía un
-   proxy solo-admin, así que nunca llega al navegador.
+   (códigos postales, cotizaciones, envíos, paquetes, tracking events) con un formulario para
+   **ejecutar cada endpoint en vivo**. El secreto `X-Service-Token` se inyecta del lado del
+   servidor vía un proxy solo-admin, así que nunca llega al navegador.
 
 > Si al loguear como admin terminás en el dashboard de operador, falta marcar al usuario
 > admin en Clerk. Ver la nota en la sección 5.

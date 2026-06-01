@@ -24,10 +24,12 @@ import { z } from "zod";
 import { requireAdmin } from "@/lib/auth-helpers";
 import { ApiError, handleApiError } from "@/lib/api-error";
 
-// Solo el contrato S2S que Shipping EXPONE para otras apps (SH1–SH4).
-// Cualquier otro path (operadores, admin, assignments, deliver…) se rechaza:
-// no son endpoints inter-app y no deben ejecutarse con el service token.
-const ALLOWED_PATH = /^\/api\/v1\/(shipping-quotes|shipments)(\/[^?]*)?(\?.*)?$/;
+// El contrato que Shipping EXPONE para otras apps: los endpoints S2S (SH1–SH4)
+// + el dataset público de códigos postales (lo consume Buyer para poblar
+// selectores). Cualquier otro path (operadores, admin, assignments, deliver…)
+// se rechaza: no son endpoints inter-app y no deben ejecutarse con el token.
+const ALLOWED_PATH =
+  /^\/api\/v1\/(shipping-quotes|shipments|postal-codes)(\/[^?]*)?(\?.*)?$/;
 
 // Headers que el cliente puede setear (el resto se ignora). El X-Service-Token
 // y el X-Request-Id los pone el servidor; nunca se aceptan del cliente.

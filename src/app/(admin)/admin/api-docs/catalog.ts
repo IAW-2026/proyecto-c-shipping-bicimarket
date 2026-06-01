@@ -2,10 +2,11 @@ import type { EndpointSpec } from "@/types/api-explorer";
 
 // Catálogo del contrato S2S que Shipping EXPONE para las otras apps del
 // marketplace (Buyer / Seller / carriers). Fuente de verdad: docs/03-apis.md
-// (SH1–SH4) + los route handlers y schemas zod reales. Solo se listan los
-// endpoints inter-app autenticados con X-Service-Token; los endpoints de la UI
-// propia (admin/operador: operadores, tarifas, deliver, assignments, override
-// de status) NO van acá porque no se exponen "para las otras apps".
+// (SH1–SH4) + los route handlers y schemas zod reales. Se listan los endpoints
+// inter-app autenticados con X-Service-Token y el dataset público de códigos
+// postales (que también consumen las otras apps). Los endpoints de la UI propia
+// (admin/operador: operadores, tarifas, deliver, assignments, override de
+// status) NO van acá porque no se exponen "para las otras apps".
 //
 // Cada `requestBody` es un ejemplo válido contra el schema zod del endpoint, y
 // `responseExample` refleja el DTO real. Los IDs de ejemplo son ilustrativos:
@@ -13,6 +14,56 @@ import type { EndpointSpec } from "@/types/api-explorer";
 // quote → shipment (ver la nota del playground).
 
 export const API_CATALOG: EndpointSpec[] = [
+  // ── Geo · Códigos postales ─────────────────────────────────────────────
+  {
+    id: "list-postal-codes",
+    tag: "Geo · Códigos postales",
+    method: "GET",
+    path: "/api/v1/postal-codes",
+    summary: "Dataset de códigos postales argentinos",
+    description:
+      "Endpoint PÚBLICO (sin auth). Devuelve el dataset embebido de códigos postales argentinos con sus coordenadas (lat/lng), ciudad y provincia. Lo consume Buyer App para poblar los selectores de dirección con la misma lista que Shipping usa para cotizar (así no se duplica el dataset ni se cotizan CPs que Shipping no conoce). También lo usa el form de 'nuevo pedido' del admin.",
+    caller: "Buyer App · UI propia",
+    auth: "Público (sin auth)",
+    params: [
+      {
+        name: "q",
+        in: "query",
+        required: false,
+        description:
+          "Filtro de texto: matchea por ciudad, código postal o provincia (case-insensitive).",
+        example: "almagro",
+      },
+      {
+        name: "province",
+        in: "query",
+        required: false,
+        description: "Filtra por provincia (case-insensitive, substring).",
+        example: "",
+      },
+    ],
+    responseStatus: 200,
+    responseExample: {
+      data: [
+        {
+          cp: "C1043",
+          lat: -34.6037,
+          lng: -58.4044,
+          city: "Almagro",
+          province: "Buenos Aires",
+        },
+      ],
+      total: 1,
+    },
+    errors: [
+      { code: "INTERNAL", status: 500, when: "Error inesperado del servidor." },
+    ],
+    notes: [
+      "Sin paginación: la lista es chica (~230 entradas, <30KB) y se ordena por provincia y luego ciudad.",
+      "Las coordenadas alimentan el cálculo de distancia (Haversine) del motor de cotización.",
+    ],
+  },
+
   // ── SH1 · Cotizaciones ─────────────────────────────────────────────────
   {
     id: "create-quote",

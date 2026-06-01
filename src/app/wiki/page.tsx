@@ -357,6 +357,13 @@ export default function WikiPage() {
         </p>
         <ul className="ml-4 list-disc space-y-1">
           <li>
+            <strong>Geo · Códigos postales:</strong>{" "}
+            <code>GET /api/v1/postal-codes</code> — dataset público de CPs
+            argentinos (lat/lng, ciudad, provincia) que Buyer usa para poblar
+            sus selectores de dirección. Es el único endpoint sin{" "}
+            <code>X-Service-Token</code>.
+          </li>
+          <li>
             <strong>SH1 · Cotizaciones:</strong>{" "}
             <code>POST /api/v1/shipping-quotes</code> (lo llama Buyer).
           </li>

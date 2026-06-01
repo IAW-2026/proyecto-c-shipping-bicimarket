@@ -424,6 +424,37 @@ Tras el delivered, Shipping notifica:
 
 ---
 
+## SH6. Códigos postales (geo)
+
+### `GET /api/v1/postal-codes`
+Endpoint **PÚBLICO** (sin auth). Devuelve el dataset embebido de códigos postales argentinos con coordenadas (lat/lng), ciudad y provincia. Lo consume Buyer App para poblar los selectores de dirección con la misma lista que Shipping usa para cotizar (evita duplicar el dataset y cotizar CPs que Shipping no conoce → `422 POSTAL_CODE_UNKNOWN`). También lo usa el form de "nuevo pedido" del admin.
+
+**Auth**: ninguna (público).
+
+**Query params** (opcionales):
+- `q` — filtro de texto; matchea por ciudad, código postal o provincia (case-insensitive).
+- `province` — filtra por provincia (case-insensitive, substring).
+
+**Response 200**
+```json
+{
+  "data": [
+    {
+      "cp": "C1043",
+      "lat": -34.6037,
+      "lng": -58.4044,
+      "city": "Almagro",
+      "province": "Buenos Aires"
+    }
+  ],
+  "total": 1
+}
+```
+
+Sin paginación: la lista es chica (~230 entradas, <30KB) y se ordena por provincia y luego por ciudad. Las coordenadas alimentan el cálculo de distancia (Haversine) del motor de cotización (ver ADR-005 en `06`/`wiki`).
+
+---
+
 # Contratos referenciados (endpoints de OTRAS apps que Shipping toca)
 
 > Estos endpoints **NO los implementa Shipping**; los implementan las apps respectivas. Acá quedan documentados los contratos porque Shipping los llama (o los llamará en sprint 2). Para el parcial (ADR-002), las llamadas salientes están reemplazadas por `logger.info({ level: "outbound-deferred", target, payload })` con el payload que se hubiera enviado.

@@ -29,12 +29,14 @@ export default function ApiDocsPage() {
           Estos son los endpoints REST que la Shipping App expone para que las
           otras apps del marketplace la consuman: Buyer cotiza y consulta
           envíos, Seller crea envíos y agrega paquetes, y los carriers reportan
-          eventos de tracking. Todos se autentican server-to-server con el header{" "}
+          eventos de tracking. Casi todos se autentican server-to-server con el
+          header{" "}
           <code className="rounded bg-muted px-1 py-0.5 font-mono text-[12px]">
             X-Service-Token
-          </code>
-          . Cada endpoint trae un formulario para probarlo en vivo, con el body
-          de ejemplo precargado.
+          </code>{" "}
+          (la excepción es el dataset de códigos postales, que es público). Cada
+          endpoint trae un formulario para probarlo en vivo, con el body de
+          ejemplo precargado.
         </p>
 
         <div className="flex items-start gap-2 rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-700 dark:text-emerald-400">
