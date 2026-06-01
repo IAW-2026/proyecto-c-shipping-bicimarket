@@ -23,6 +23,7 @@ import { ShipmentRouteMap } from "@/components/shipping/ShipmentRouteMap";
 import { OrderShipmentFlow } from "@/components/shipping/OrderShipmentFlow";
 import { TrackingTimeline } from "@/components/shipping/TrackingTimeline";
 import { ProofImage } from "@/components/shipping/ProofImage";
+import { KeepShoppingCarousel } from "@/components/products/KeepShoppingCarousel";
 import { useTracking } from "@/hooks/querys/track/useTracking";
 import { distanceBetweenPostalCodes } from "@/lib/geo/distance";
 import {
@@ -232,6 +233,9 @@ export function TrackingResult({ code }: TrackingResultProps) {
           </Button>
         </div>
       </div>
+
+      {/* Seguir comprando: catálogo de la Seller App (sutil, oculto al imprimir) */}
+      <KeepShoppingCarousel className="pt-2 print:hidden" />
 
       {/* Footer estilo "voucher" — solo visible al imprimir */}
       <div className="hidden text-center text-[10px] text-muted-foreground print:block">

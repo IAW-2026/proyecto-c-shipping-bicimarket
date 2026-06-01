@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { ArrowRight, Package, Search } from "lucide-react";
+import { ArrowRight, BookOpen, Package, Search } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import { resolveLandingPath } from "@/lib/auth-helpers";
 import { LandingBackground } from "./_components/LandingBackground";
+import { KeepShoppingCarousel } from "@/components/products/KeepShoppingCarousel";
 
 /**
  * Landing pública. Mockup: `desing -references/Landing.png`.
@@ -91,8 +92,21 @@ export default async function Home() {
             <ArrowRight className="size-4" />
           </Link>
 
+          {/* Guía / mini-wiki del proyecto (pensada para la corrección) */}
+          <Link
+            href="/wiki"
+            className="inline-flex items-center justify-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <BookOpen className="size-3.5" />
+            Guía del proyecto y FAQ (para corrección)
+          </Link>
         </div>
       </main>
+
+      {/* Seguir comprando: catálogo de la Seller App (sutil, auto-scroll) */}
+      <div className="relative z-10 mx-auto w-full max-w-2xl px-6 pb-6">
+        <KeepShoppingCarousel />
+      </div>
 
       <footer className="relative z-10 mx-auto flex w-full max-w-5xl items-center justify-center px-6 py-6 text-xs text-muted-foreground">
         <p>Hecho con ♥ en Argentina</p>

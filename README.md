@@ -1,5 +1,8 @@
 # Shipping App — BiciMarket (Proyecto IAW 2026, tipo C)
 
+## 0. informacion general del proyecto
+- **se recomienda fuertemente visitar la wiki para obtener informacion clara y actualizada**: <https://proyecto-c-shipping-bicimarket.vercel.app/wiki>
+
 ## 1. Deploy de producción
 
 **https://proyecto-c-shipping-bicimarket.vercel.app/**
@@ -30,6 +33,11 @@ Todos los usuarios usan la contraseña **`iawuser#`**.
      confirmar entrega (con foto de prueba) o registrar una entrega fallida.
 4. **Tracking público** (sin login): la página `/track/<código>` permite seguir un pedido
    con su código `BMK-…`. Podés copiar uno desde el detalle de un envío en el panel admin.
+5. **Documentación interactiva de la API** (como admin, en `/admin/api-docs`): una página
+   tipo Swagger que documenta el contrato REST que Shipping **expone para las otras apps**
+   (cotizaciones, envíos, paquetes, tracking events) con un formulario para **ejecutar cada
+   endpoint en vivo**. El secreto `X-Service-Token` se inyecta del lado del servidor vía un
+   proxy solo-admin, así que nunca llega al navegador.
 
 > Si al loguear como admin terminás en el dashboard de operador, falta marcar al usuario
 > admin en Clerk. Ver la nota en la sección 5.
@@ -76,6 +84,9 @@ La lógica propia de Shipping (envíos, asignaciones, tracking, tarifas) funcion
   - **IDs con prefijo** estilo Stripe (`shp_`, `qte_`, `pkg_`, `grp_`, …) e **idempotencia**
     por `Idempotency-Key` en los POST que crean recursos.
   - Transiciones de estado inválidas devuelven `409 INVALID_TRANSITION`.
+  - **API docs interactiva** (`/admin/api-docs`): documentación tipo Swagger del contrato
+    S2S que Shipping expone (SH1–SH4), con un playground que ejecuta cada endpoint a través
+    de un proxy solo-admin que inyecta el `X-Service-Token` server-side.
 - **Limitaciones conocidas**: Sprint 1 standalone (outbound diferido + datos externos
   mockeados, ADR-002); en desarrollo `AUTO_PROVISION_OPERATORS=true` crea el operador
   on-login si no existe.

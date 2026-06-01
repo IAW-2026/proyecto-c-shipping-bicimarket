@@ -9,6 +9,7 @@ const SEGMENT_LABELS: Record<string, string> = {
   shipments: "Envíos",
   operators: "Operadores",
   rates: "Tarifaría",
+  "api-docs": "API · Contratos",
   new: "Nuevo",
 };
 

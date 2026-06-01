@@ -57,15 +57,8 @@ export default function TrackSearchPage() {
           También aceptamos el código de un envío individual (
           <code className="font-mono">TRK-AR-…</code>) o el ID interno (
           <code className="font-mono">shp_…</code>) — te llevamos igual a tu pedido completo.
-          Si no encontrás tu código, revisá el email de confirmación de tu compra o
-          escribí a{" "}
-          <a
-            href="mailto:soporte@bicimarket.com"
-            className="text-primary hover:underline"
-          >
-            soporte@bicimarket.com
-          </a>
-          .
+          Si no encontrás tu código, revisá la confirmación de tu compra 
+
         </p>
       </div>
     </div>

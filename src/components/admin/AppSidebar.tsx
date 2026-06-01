@@ -4,6 +4,7 @@ import Link from "next/link";
 import {
   Compass,
   LifeBuoy,
+  Network,
   Package,
   Scale,
   Truck,
@@ -46,6 +47,11 @@ const NAV_MAIN = [
     title: "Tarifaría",
     url: "/admin/rates",
     icon: Scale,
+  },
+  {
+    title: "API · Contratos",
+    url: "/admin/api-docs",
+    icon: Network,
   },
 ] as const;
 

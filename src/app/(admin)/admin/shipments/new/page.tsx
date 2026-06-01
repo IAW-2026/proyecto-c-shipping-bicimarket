@@ -20,6 +20,7 @@ export default function NewShipmentPage() {
         <p className="text-sm text-muted-foreground">
           Crea un envío manualmente para probar el flujo. En producción, Seller
           App es quien crea los envíos via S2S — esta pantalla es solo dev.
+          
         </p>
       </div>
 
