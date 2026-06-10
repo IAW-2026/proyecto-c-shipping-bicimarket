@@ -2,6 +2,7 @@
 // (docs/03 §CR2). Sprint 1 no se envía — se loguea como outbound-deferred.
 
 export interface BuyerOrderShippingPatchBody {
+  status: "ready_to_ship" | "in_transit" | "delivered";
   shipping_status:
     | "ready_for_pickup"
     | "picked_up"

@@ -2,11 +2,12 @@
  * Seed dev — Shipping App (ADR-005)
  *
  * Corre con:
- *   npm run db:seed              (limpia y reseedea TODO)
+ *   npm run db:seed              (limpia datos de negocio y reseedea)
  *   npx prisma migrate reset     (drop + migrate + seed)
  *
- * ⚠️ NUNCA correr contra producción. Borra TODOS los shipments / quotes /
- * operadores / status history.
+ * ⚠️ NUNCA correr contra producción. Borra TODOS los datos de negocio
+ * (shipments / quotes / status history / assignments / proofs), pero
+ * preserva los usuarios locales de la app (`logistics_operators`).
  *
  * Contenido del seed:
  *   - 45 shipping_rates (5 distancias × 3 pesos × 3 services).
@@ -967,14 +968,13 @@ async function main() {
   console.log("🌱 Seeding Shipping App DB (ADR-005)...\n");
 
   // ── Limpieza ───────────────────────────────────────────────────────────
-  console.log("→ Limpiando datos previos...");
+  console.log("→ Limpiando datos previos (preservando usuarios)...");
   // Cascade desde ShipmentGroup elimina shipments (y desde ahí packages,
   // events, proofs, history) + assignments por grupo. Borramos shipments
   // sueltos por las dudas (no debería quedar ninguno sin grupo).
   await prisma.shipmentGroup.deleteMany({});
   await prisma.shipment.deleteMany({});
   await prisma.shippingQuote.deleteMany({});
-  await prisma.logisticsOperator.deleteMany({});
   await prisma.shippingRate.deleteMany({});
 
   // ── Rates ──────────────────────────────────────────────────────────────
@@ -982,8 +982,23 @@ async function main() {
   await prisma.shippingRate.createMany({ data: RATES });
 
   // ── Operadores ─────────────────────────────────────────────────────────
-  console.log(`→ Insertando ${OPERATORS.length} operadores demo...`);
-  await prisma.logisticsOperator.createMany({ data: OPERATORS as never });
+  console.log(`→ Asegurando ${OPERATORS.length} operadores demo sin borrar existentes...`);
+  for (const operator of OPERATORS) {
+    await prisma.logisticsOperator.upsert({
+      where: { clerkUserId: operator.clerkUserId },
+      update: {
+        fullName: operator.fullName,
+        email: operator.email,
+        phone: operator.phone,
+        documentId: operator.documentId,
+        vehicleType: operator.vehicleType,
+        licensePlate: operator.licensePlate,
+        status: operator.status,
+        deletedAt: null,
+      },
+      create: operator,
+    });
+  }
 
   // ── Escenarios ─────────────────────────────────────────────────────────
   console.log(`→ Creando ${SCENARIOS.length} escenarios de uso...`);

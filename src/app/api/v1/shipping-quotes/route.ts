@@ -8,15 +8,51 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireServiceToken } from "@/lib/service-auth";
+import { callServiceApi, requireServiceToken } from "@/lib/service-auth";
 import { generateId } from "@/lib/ids";
-import { handleApiError } from "@/lib/api-error";
-import { getMockPickupAddress } from "@/lib/mocks";
+import { ApiError, handleApiError } from "@/lib/api-error";
 import { toQuoteResponseDTO } from "@/lib/dto";
 import { createQuoteSchema } from "@/validation/shipping-quotes";
 import { quoteMultiOriginSum } from "@/lib/quote-engine";
+import { adaptPickupAddressApi } from "@/adapters/seller";
+import type { SellerPickupAddressApi } from "@/types/external/seller";
 
 const QUOTE_TTL_MS = 60 * 60 * 1000; // 60 min
+
+async function fetchPickupAddress(sellerProfileId: string) {
+  let res: Response;
+  try {
+    res = await callServiceApi(
+      "seller",
+      `/api/v1/seller-profile/${sellerProfileId}/pickup-address`,
+    );
+  } catch (err) {
+    throw new ApiError(
+      "UPSTREAM_ERROR",
+      502,
+      "No pudimos obtener la dirección de retiro del vendedor",
+      { seller_profile_id: sellerProfileId, target: "seller", cause: String(err) },
+    );
+  }
+
+  if (!res.ok) {
+    const details = await res.text().catch(() => "");
+    throw new ApiError(
+      res.status === 404 ? "SELLER_PICKUP_ADDRESS_NOT_FOUND" : "UPSTREAM_ERROR",
+      res.status === 404 ? 422 : 502,
+      "No pudimos resolver la dirección de retiro del vendedor",
+      {
+        seller_profile_id: sellerProfileId,
+        target: "seller",
+        upstream_status: res.status,
+        upstream_body: details,
+      },
+    );
+  }
+
+  const raw = (await res.json()) as SellerPickupAddressApi;
+  return adaptPickupAddressApi(raw);
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -53,9 +89,12 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Sprint 1 / ADR-002: pickup_address mockeada (CR1).
-    const pickupsResolved = body.pickups.map((p) => {
-      const address = getMockPickupAddress(p.seller_profile_id);
+    const pickupAddresses = await Promise.all(
+      body.pickups.map((p) => fetchPickupAddress(p.seller_profile_id)),
+    );
+
+    const pickupsResolved = body.pickups.map((p, idx) => {
+      const address = pickupAddresses[idx];
       const weightGramsTotal = p.packages.reduce(
         (sum, pk) => sum + pk.weight_grams,
         0,

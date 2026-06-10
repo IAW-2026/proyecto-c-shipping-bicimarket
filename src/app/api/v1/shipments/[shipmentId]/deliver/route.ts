@@ -1,5 +1,5 @@
-// POST /api/v1/shipments/{shipmentId}/deliver — SH4 deliver (docs/03)
-// Auth: JWT logistics. Atómico: crea tracking_event=delivered, delivery_proof,
+// POST /api/v1/shipments/{shipmentId}/deliver - SH4 deliver (docs/03)
+// Auth: JWT logistics. Atomico: crea tracking_event=delivered, delivery_proof,
 // shipment.status=delivered, marca assignment activo como delivered.
 
 import { NextRequest, NextResponse } from "next/server";
@@ -15,9 +15,14 @@ import {
   StatusHistorySource,
 } from "@/generated/prisma/client";
 import { assertTransition } from "@/lib/transitions";
-import { logger } from "@/lib/logger";
+import { callServiceApi } from "@/lib/service-auth";
 import { recomputeGroupStatus } from "@/lib/group-status";
 import type { DeliverShipmentResponse } from "@/types/tracking-events";
+import type { BuyerOrderShippingPatchBody } from "@/types/external/buyer";
+import type {
+  PaymentsShipmentDeliveredBody,
+  SellerSalesOrderShippingStatusPatchBody,
+} from "@/types/external/payments";
 
 export async function POST(
   req: NextRequest,
@@ -85,9 +90,6 @@ export async function POST(
         },
       });
 
-      // ADR-006: recomputar el rollup del pedido. La asignación es a nivel
-      // grupo (un operador maneja todo el pedido), así que solo la cerramos
-      // cuando TODOS los pickups del pedido están entregados.
       const rollup = await recomputeGroupStatus(tx, shipment.shipmentGroupId);
       if (rollup === ShipmentStatus.delivered) {
         await tx.deliveryAssignment.updateMany({
@@ -112,44 +114,79 @@ export async function POST(
       return proof;
     });
 
-    // ─── Sprint 1 (ADR-002): outbound diferido a 3 destinos ────────────────
     const occurredAtIso = occurredAt.toISOString();
-    logger.outboundDeferred({
-      target: "buyer",
-      method: "PATCH",
-      path: `/api/v1/orders/${shipment.orderId}/seller-groups/${shipment.orderSellerGroupId}/shipping`,
-      payload: {
-        shipping_status: "delivered",
+    const buyerBody: BuyerOrderShippingPatchBody = {
+      status: "delivered",
+      shipping_status: "delivered",
+      shipment_id: shipment.id,
+      tracking_number: shipment.group.trackingNumber,
+      occurred_at: occurredAtIso,
+    };
+    const sellerBody: SellerSalesOrderShippingStatusPatchBody = {
+      shipping_status: "delivered",
+      shipment_id: shipment.id,
+      occurred_at: occurredAtIso,
+    };
+    const paymentsBody: PaymentsShipmentDeliveredBody = {
+      shipment_id: shipment.id,
+      order_id: shipment.orderId,
+      order_seller_group_id: shipment.orderSellerGroupId,
+      sales_order_id: shipment.salesOrderId,
+      seller_profile_id: shipment.sellerProfileId,
+      delivered_at: occurredAtIso,
+    };
+
+    try {
+      const [buyerRes, sellerRes, paymentsRes] = await Promise.all([
+        callServiceApi(
+          "buyer",
+          `/api/v1/orders/${shipment.orderId}/seller-groups/${shipment.orderSellerGroupId}/shipping`,
+          { method: "PATCH", body: buyerBody },
+        ),
+        callServiceApi(
+          "seller",
+          `/api/v1/sales-orders/${shipment.salesOrderId}/shipping-status`,
+          { method: "PATCH", body: sellerBody },
+        ),
+        callServiceApi("payments", "/api/v1/internal/shipment-delivered", {
+          method: "POST",
+          body: paymentsBody,
+        }),
+      ]);
+
+      if (!buyerRes.ok) {
+        throw new ApiError("UPSTREAM_ERROR", 502, "Buyer rechazo la entrega", {
+          target: "buyer",
+          upstream_status: buyerRes.status,
+          shipment_id: shipment.id,
+        });
+      }
+      if (!sellerRes.ok) {
+        throw new ApiError("UPSTREAM_ERROR", 502, "Seller rechazo la entrega", {
+          target: "seller",
+          upstream_status: sellerRes.status,
+          shipment_id: shipment.id,
+        });
+      }
+      if (!paymentsRes.ok) {
+        throw new ApiError(
+          "UPSTREAM_ERROR",
+          502,
+          "Payments rechazo la liquidacion por entrega",
+          {
+            target: "payments",
+            upstream_status: paymentsRes.status,
+            shipment_id: shipment.id,
+          },
+        );
+      }
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      throw new ApiError("UPSTREAM_ERROR", 502, "Fallo la propagacion de la entrega", {
         shipment_id: shipment.id,
-        // ADR-006: el comprador sigue el pedido por el tracking GLOBAL.
-        tracking_number: shipment.group.trackingNumber,
-        occurred_at: occurredAtIso,
-      },
-    });
-    logger.outboundDeferred({
-      target: "seller",
-      method: "PATCH",
-      path: `/api/v1/sales-orders/${shipment.salesOrderId}/shipping-status`,
-      payload: {
-        shipping_status: "delivered",
-        shipment_id: shipment.id,
-        occurred_at: occurredAtIso,
-      },
-    });
-    logger.outboundDeferred({
-      target: "payments",
-      method: "POST",
-      path: "/api/v1/internal/shipment-delivered",
-      payload: {
-        shipment_id: shipment.id,
-        order_id: shipment.orderId,
-        order_seller_group_id: shipment.orderSellerGroupId,
-        sales_order_id: shipment.salesOrderId,
-        seller_profile_id: shipment.sellerProfileId,
-        delivered_at: occurredAtIso,
-      },
-    });
-    // ───────────────────────────────────────────────────────────────────────
+        cause: String(err),
+      });
+    }
 
     const response: DeliverShipmentResponse = {
       shipment_id: shipment.id,

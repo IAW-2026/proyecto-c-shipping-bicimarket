@@ -1,40 +1,114 @@
-// POST /api/v1/shipments/{shipmentId}/tracking-events — SH4 create (docs/03)
-// GET  /api/v1/shipments/{shipmentId}/tracking-events — SH4 list
+// POST /api/v1/shipments/{shipmentId}/tracking-events - SH4 create (docs/03)
+// GET  /api/v1/shipments/{shipmentId}/tracking-events - SH4 list
 //
 // Auth POST: JWT logistics (operador activo) o S2S (carrier integration).
 // Auth GET:  JWT (cualquier logueado) o S2S.
-//
-// Auto-asignación (modelo "marketplace de envíos"):
-//   Si un operador hace POST con event_type=picked_up sobre un shipment en
-//   ready_for_pickup que NO tiene assignment activo, le creamos el assignment
-//   automáticamente. Esto permite que cualquier operador "agarre" envíos
-//   disponibles desde la lista, sin pasar por un admin.
-//
-//   Si el shipment ya tiene un assignment activo de OTRO operador y otro
-//   intenta agarrarlo → 409 SHIPMENT_ALREADY_ASSIGNED.
 
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
-import { requireServiceToken } from "@/lib/service-auth";
+import { callServiceApi, requireServiceToken } from "@/lib/service-auth";
 import { getActiveOperator } from "@/lib/auth-helpers";
 import { generateId } from "@/lib/ids";
 import { ApiError, handleApiError } from "@/lib/api-error";
 import { paginate } from "@/lib/pagination";
 import { toTrackingEventDTO } from "@/lib/dto";
 import { createTrackingEventSchema } from "@/validation/shipments";
-import {
-  assertTransition,
-  eventTypeToStatus,
-} from "@/lib/transitions";
+import { assertTransition, eventTypeToStatus } from "@/lib/transitions";
 import {
   AssignmentStatus,
   ShipmentStatus,
   StatusHistorySource,
   TrackingEventType,
 } from "@/generated/prisma/client";
-import { logger } from "@/lib/logger";
 import { recomputeGroupStatus } from "@/lib/group-status";
+import type { BuyerOrderShippingPatchBody } from "@/types/external/buyer";
+import type { SellerSalesOrderShippingStatusPatchBody } from "@/types/external/payments";
+
+type NotifiableShipmentStatus = BuyerOrderShippingPatchBody["shipping_status"];
+
+function mapBuyerGroupStatus(
+  status: NotifiableShipmentStatus,
+): BuyerOrderShippingPatchBody["status"] | null {
+  switch (status) {
+    case ShipmentStatus.ready_for_pickup:
+    case ShipmentStatus.picked_up:
+      return "ready_to_ship";
+    case ShipmentStatus.in_transit:
+    case ShipmentStatus.out_for_delivery:
+    case ShipmentStatus.failed_delivery:
+    case ShipmentStatus.returned:
+      return "in_transit";
+    case ShipmentStatus.delivered:
+      return "delivered";
+    default:
+      return null;
+  }
+}
+
+async function propagateShipmentStatus(params: {
+  shipmentId: string;
+  shipmentStatus: NotifiableShipmentStatus;
+  orderId: string;
+  orderSellerGroupId: string;
+  salesOrderId: string;
+  orderTrackingNumber: string;
+  occurredAt: string;
+}) {
+  const buyerStatus = mapBuyerGroupStatus(params.shipmentStatus);
+  if (!buyerStatus) return;
+
+  const buyerBody: BuyerOrderShippingPatchBody = {
+    status: buyerStatus,
+    shipping_status: params.shipmentStatus,
+    shipment_id: params.shipmentId,
+    tracking_number: params.orderTrackingNumber,
+    occurred_at: params.occurredAt,
+  };
+
+  const sellerBody: SellerSalesOrderShippingStatusPatchBody = {
+    shipping_status: params.shipmentStatus,
+    shipment_id: params.shipmentId,
+    occurred_at: params.occurredAt,
+  };
+
+  try {
+    const [buyerRes, sellerRes] = await Promise.all([
+      callServiceApi(
+        "buyer",
+        `/api/v1/orders/${params.orderId}/seller-groups/${params.orderSellerGroupId}/shipping`,
+        { method: "PATCH", body: buyerBody },
+      ),
+      callServiceApi(
+        "seller",
+        `/api/v1/sales-orders/${params.salesOrderId}/shipping-status`,
+        { method: "PATCH", body: sellerBody },
+      ),
+    ]);
+
+    if (!buyerRes.ok) {
+      throw new ApiError("UPSTREAM_ERROR", 502, "Buyer rechazo la actualizacion de envio", {
+        target: "buyer",
+        upstream_status: buyerRes.status,
+        shipment_id: params.shipmentId,
+      });
+    }
+
+    if (!sellerRes.ok) {
+      throw new ApiError("UPSTREAM_ERROR", 502, "Seller rechazo la actualizacion de envio", {
+        target: "seller",
+        upstream_status: sellerRes.status,
+        shipment_id: params.shipmentId,
+      });
+    }
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    throw new ApiError("UPSTREAM_ERROR", 502, "Fallo la propagacion del estado de envio", {
+      shipment_id: params.shipmentId,
+      cause: String(err),
+    });
+  }
+}
 
 export async function POST(
   req: NextRequest,
@@ -43,7 +117,6 @@ export async function POST(
   try {
     const { shipmentId } = await params;
 
-    // Auth: S2S o JWT logistics
     const s2sDenied = requireServiceToken(req);
     let source: typeof StatusHistorySource.logistics | typeof StatusHistorySource.system =
       StatusHistorySource.system;
@@ -78,11 +151,6 @@ export async function POST(
       assertTransition(shipment.status as ShipmentStatus, nextStatus);
     }
 
-    // ── Asignación a nivel GRUPO (ADR-006) ───────────────────────────────
-    // El operador toma el PEDIDO entero. Cuando hace picked_up sobre un envío
-    // de un pedido que nadie tomó, queda dueño del grupo completo. Si el grupo
-    // ya lo tiene OTRO operador → 409. Si lo tiene él, sigue trabajándolo (y
-    // solo avanza el status del pickup, sin crear otra asignación).
     let shouldClaimGroup = false;
     if (
       operatorClerkUserId &&
@@ -102,19 +170,7 @@ export async function POST(
       }
     }
 
-    // ADR-006: si la transición es a picked_up, después de avanzar el estado
-    // chequeamos si todos los pickups del grupo ya están en picked_up o más
-    // adelante. Si sí, marcamos para emitir el log derivado (CR2). Solo aplica
-    // a pedidos multi-vendedor.
-    type OrderAllPickedUpInfo = { orderId: string; shipmentIds: string[] };
-
-    const { event, orderAllPickedUpInfo } = await prisma.$transaction(async (tx) => {
-      let pickedUpInfo: OrderAllPickedUpInfo | null = null;
-
-      // ── 1. Claim del grupo (race-safe) ────────────────────────────────
-      //    Solo UN operador puede pasar assignedOperatorClerkUserId de null
-      //    a sí mismo. `updateMany` con el WHERE en null garantiza atomicidad
-      //    por fila sin lock explícito. El segundo operador ve count===0.
+    const { event } = await prisma.$transaction(async (tx) => {
       if (shouldClaimGroup && operatorClerkUserId) {
         const groupGuard = await tx.shipmentGroup.updateMany({
           where: {
@@ -127,10 +183,10 @@ export async function POST(
           throw new ApiError(
             "SHIPMENT_ALREADY_ASSIGNED",
             409,
-            "Otro operador acaba de tomar este pedido. Refrescá la lista.",
+            "Otro operador acaba de tomar este pedido. Refresca la lista.",
           );
         }
-        // Ganamos la carrera — una sola asignación a nivel grupo.
+
         await tx.deliveryAssignment.create({
           data: {
             id: generateId("dla"),
@@ -141,10 +197,6 @@ export async function POST(
         });
       }
 
-      // ── 2. Avance del status del pickup ───────────────────────────────
-      //    Para ready_for_pickup → picked_up usamos guard atómico (protege
-      //    el doble evento sobre el MISMO pickup). El resto de transiciones
-      //    solo las alcanza el operador dueño del grupo, sin race.
       if (nextStatus && nextStatus !== shipment.status) {
         if (
           shipment.status === ShipmentStatus.ready_for_pickup &&
@@ -158,7 +210,7 @@ export async function POST(
             throw new ApiError(
               "SHIPMENT_ALREADY_ASSIGNED",
               409,
-              "Este envío acaba de actualizarse. Refrescá la lista.",
+              "Este envio acaba de actualizarse. Refresca la lista.",
             );
           }
         } else {
@@ -180,7 +232,6 @@ export async function POST(
         },
       });
 
-      // Audit history siempre que hubo cambio de status.
       if (nextStatus && nextStatus !== shipment.status) {
         await tx.shipmentStatusHistory.create({
           data: {
@@ -193,83 +244,23 @@ export async function POST(
           },
         });
 
-        // ADR-006: recomputar y persistir el rollup del pedido.
         await recomputeGroupStatus(tx, shipment.shipmentGroupId);
       }
 
-      // ADR-006: detección de "todos los pickups del pedido están listos".
-      if (nextStatus === ShipmentStatus.picked_up) {
-        const siblings = await tx.shipment.findMany({
-          where: { shipmentGroupId: shipment.shipmentGroupId },
-          select: { id: true, status: true },
-        });
-        if (siblings.length > 1) {
-          const PICKED_UP_OR_BEYOND = new Set<ShipmentStatus>([
-            ShipmentStatus.picked_up,
-            ShipmentStatus.in_transit,
-            ShipmentStatus.out_for_delivery,
-            ShipmentStatus.delivered,
-          ]);
-          const allPickedUp = siblings.every((s) =>
-            s.id === shipmentId
-              ? true
-              : PICKED_UP_OR_BEYOND.has(s.status as ShipmentStatus),
-          );
-          if (allPickedUp) {
-            pickedUpInfo = {
-              orderId: shipment.orderId,
-              shipmentIds: siblings.map((s) => s.id),
-            };
-          }
-        }
-      }
-
-      return { event: ev, orderAllPickedUpInfo: pickedUpInfo };
+      return { event: ev };
     });
 
-    // ─── Sprint 1 (ADR-002): outbound diferido a Buyer y Seller ────────────
     if (nextStatus) {
-      logger.outboundDeferred({
-        target: "buyer",
-        method: "PATCH",
-        path: `/api/v1/orders/${shipment.orderId}/seller-groups/${shipment.orderSellerGroupId}/shipping`,
-        payload: {
-          shipping_status: nextStatus,
-          shipment_id: shipment.id,
-          // ADR-006: el comprador sigue el pedido por el tracking GLOBAL.
-          tracking_number: shipment.group.trackingNumber,
-          occurred_at: body.occurred_at,
-        },
-      });
-      logger.outboundDeferred({
-        target: "seller",
-        method: "PATCH",
-        path: `/api/v1/sales-orders/${shipment.salesOrderId}/shipping-status`,
-        payload: {
-          shipping_status: nextStatus,
-          shipment_id: shipment.id,
-          occurred_at: body.occurred_at,
-        },
+      await propagateShipmentStatus({
+        shipmentId: shipment.id,
+        shipmentStatus: nextStatus as NotifiableShipmentStatus,
+        orderId: shipment.orderId,
+        orderSellerGroupId: shipment.orderSellerGroupId,
+        salesOrderId: shipment.salesOrderId,
+        orderTrackingNumber: shipment.group.trackingNumber,
+        occurredAt: body.occurred_at,
       });
     }
-
-    // ADR-005: si la última pickup del order_id se acaba de marcar,
-    // emitimos un log derivado (consolidated picked_up). Es informativo
-    // dentro del sprint 1 / ADR-002; en sprint 2 puede convertirse en una
-    // llamada real al Buyer.
-    if (orderAllPickedUpInfo) {
-      logger.outboundDeferred({
-        target: "buyer",
-        method: "POST",
-        path: `/api/v1/orders/${orderAllPickedUpInfo.orderId}/all-shipments-picked-up`,
-        payload: {
-          order_id: orderAllPickedUpInfo.orderId,
-          shipment_ids: orderAllPickedUpInfo.shipmentIds,
-          occurred_at: body.occurred_at,
-        },
-      });
-    }
-    // ───────────────────────────────────────────────────────────────────────
 
     return NextResponse.json(toTrackingEventDTO(event), { status: 201 });
   } catch (err) {
@@ -284,7 +275,6 @@ export async function GET(
   try {
     const { shipmentId } = await params;
 
-    // S2S o JWT
     const s2sDenied = requireServiceToken(req);
     if (s2sDenied) {
       const { userId } = await auth();

@@ -152,7 +152,7 @@ export const API_CATALOG: EndpointSpec[] = [
     ],
     notes: [
       "service_level: standard | express | same_day.",
-      "Sprint 1 (ADR-002): la pickup_address de cada seller se mockea en lib/mocks.ts.",
+      "La pickup_address de cada seller se resuelve por S2S contra Seller App.",
     ],
   },
 
@@ -367,7 +367,7 @@ export const API_CATALOG: EndpointSpec[] = [
     path: "/api/v1/shipments/{shipmentId}/tracking-events",
     summary: "Registrar un evento de tracking",
     description:
-      "Lo puede llamar la integración del carrier (S2S) o un operador logístico (JWT). Si el evento cambia el estado del envío, valida la transición contra la máquina de estados y dispara las notificaciones a Buyer/Seller (diferidas en Sprint 1).",
+      "Lo puede llamar la integración del carrier (S2S) o un operador logístico (JWT). Si el evento cambia el estado del envío, valida la transición contra la máquina de estados y propaga el cambio en tiempo real a Buyer y Seller.",
     caller: "Carrier / integración (S2S) · Operador (JWT)",
     auth: "X-Service-Token (S2S) o JWT logistics",
     params: [
