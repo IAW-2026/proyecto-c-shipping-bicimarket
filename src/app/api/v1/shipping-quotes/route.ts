@@ -1,8 +1,8 @@
-// POST /api/v1/shipping-quotes — SH1 (docs/03)
+// POST /api/v1/shipping-quotes - SH1 (docs/03)
 // Auth: S2S (X-Service-Token). Lo llama Buyer App durante el checkout.
 //
 // Desde ADR-005: el endpoint acepta siempre pickups[] (N>=1). Devuelve N
-// cotizaciones agrupadas con descuento aplicado por la fórmula
+// cotizaciones agrupadas con descuento aplicado por la formula
 // multiOriginDiscountFactor (0% para N=1, 5% por cada origen adicional
 // hasta tope de 20%). Reemplaza el body viejo single-origen.
 
@@ -15,11 +15,19 @@ import { toQuoteResponseDTO } from "@/lib/dto";
 import { createQuoteSchema } from "@/validation/shipping-quotes";
 import { quoteMultiOriginSum } from "@/lib/quote-engine";
 import { adaptPickupAddressApi } from "@/adapters/seller";
+import { logger } from "@/lib/logger";
 import type { SellerPickupAddressApi } from "@/types/external/seller";
 
-const QUOTE_TTL_MS = 60 * 60 * 1000; // 60 min
+const QUOTE_TTL_MS = 60 * 60 * 1000;
 
-async function fetchPickupAddress(sellerProfileId: string) {
+async function fetchPickupAddress(sellerProfileId: string, requestId: string) {
+  logger.info({
+    msg: "shipping-quotes.fetch-pickup.start",
+    requestId,
+    seller_profile_id: sellerProfileId,
+    target: "seller",
+  });
+
   let res: Response;
   try {
     res = await callServiceApi(
@@ -27,20 +35,48 @@ async function fetchPickupAddress(sellerProfileId: string) {
       `/api/v1/seller-profile/${sellerProfileId}/pickup-address`,
     );
   } catch (err) {
+    logger.error({
+      msg: "shipping-quotes.fetch-pickup.exception",
+      requestId,
+      seller_profile_id: sellerProfileId,
+      target: "seller",
+      cause: String(err),
+    });
     throw new ApiError(
       "UPSTREAM_ERROR",
       502,
-      "No pudimos obtener la dirección de retiro del vendedor",
-      { seller_profile_id: sellerProfileId, target: "seller", cause: String(err) },
+      "No pudimos obtener la direccion de retiro del vendedor",
+      {
+        seller_profile_id: sellerProfileId,
+        target: "seller",
+        cause: String(err),
+      },
     );
   }
 
+  logger.info({
+    msg: "shipping-quotes.fetch-pickup.response",
+    requestId,
+    seller_profile_id: sellerProfileId,
+    target: "seller",
+    upstream_status: res.status,
+    ok: res.ok,
+  });
+
   if (!res.ok) {
     const details = await res.text().catch(() => "");
+    logger.warn({
+      msg: "shipping-quotes.fetch-pickup.failed",
+      requestId,
+      seller_profile_id: sellerProfileId,
+      target: "seller",
+      upstream_status: res.status,
+      upstream_body: details,
+    });
     throw new ApiError(
       res.status === 404 ? "SELLER_PICKUP_ADDRESS_NOT_FOUND" : "UPSTREAM_ERROR",
       res.status === 404 ? 422 : 502,
-      "No pudimos resolver la dirección de retiro del vendedor",
+      "No pudimos resolver la direccion de retiro del vendedor",
       {
         seller_profile_id: sellerProfileId,
         target: "seller",
@@ -51,19 +87,50 @@ async function fetchPickupAddress(sellerProfileId: string) {
   }
 
   const raw = (await res.json()) as SellerPickupAddressApi;
+  logger.info({
+    msg: "shipping-quotes.fetch-pickup.success",
+    requestId,
+    seller_profile_id: sellerProfileId,
+    postal_code: raw.pickup_address.postal_code,
+    city: raw.pickup_address.city,
+    province: raw.pickup_address.province,
+  });
   return adaptPickupAddressApi(raw);
 }
 
 export async function POST(req: NextRequest) {
+  const requestId = req.headers.get("x-request-id") ?? crypto.randomUUID();
+
   try {
+    logger.info({
+      msg: "shipping-quotes.request.received",
+      requestId,
+      has_service_token: Boolean(req.headers.get("x-service-token")),
+      idempotency_key: req.headers.get("idempotency-key"),
+    });
+
     const denied = requireServiceToken(req);
-    if (denied) return denied;
+    if (denied) {
+      logger.warn({
+        msg: "shipping-quotes.request.denied",
+        requestId,
+        reason: "service-token",
+      });
+      return denied;
+    }
 
     const body = createQuoteSchema.parse(await req.json());
     const idempotencyKey = req.headers.get("idempotency-key");
 
-    // Idempotencia: las N quotes se persisten con idempotencyKey
-    // `${K}:${idx}`. En POST repetido recuperamos por prefijo.
+    logger.info({
+      msg: "shipping-quotes.request.parsed",
+      requestId,
+      origins_count: body.pickups.length,
+      destination_postal_code: body.to.postal_code,
+      service_level: body.service_level,
+      seller_profile_ids: body.pickups.map((p) => p.seller_profile_id),
+    });
+
     if (idempotencyKey) {
       const existing = await prisma.shippingQuote.findMany({
         where: {
@@ -71,12 +138,16 @@ export async function POST(req: NextRequest) {
         },
         orderBy: { idempotencyKey: "asc" },
       });
+
       if (existing.length > 0) {
-        // Reconstruimos los totales desde lo que ya está persistido.
-        const totalNet = existing.reduce((s, q) => s + q.costCents, 0);
-        // No tenemos el gross persistido — devolvemos totalNet en ambos
-        // campos. (En la práctica el cliente reintenta exactamente con la
-        // misma key y le importa identidad, no el desglose gross/net.)
+        logger.info({
+          msg: "shipping-quotes.idempotency.hit",
+          requestId,
+          idempotency_key: idempotencyKey,
+          quotes_found: existing.length,
+        });
+
+        const totalNet = existing.reduce((sum, quote) => sum + quote.costCents, 0);
         return NextResponse.json(
           toQuoteResponseDTO({
             quotes: existing,
@@ -90,57 +161,93 @@ export async function POST(req: NextRequest) {
     }
 
     const pickupAddresses = await Promise.all(
-      body.pickups.map((p) => fetchPickupAddress(p.seller_profile_id)),
+      body.pickups.map((pickup) =>
+        fetchPickupAddress(pickup.seller_profile_id, requestId),
+      ),
     );
 
-    const pickupsResolved = body.pickups.map((p, idx) => {
+    const pickupsResolved = body.pickups.map((pickup, idx) => {
       const address = pickupAddresses[idx];
-      const weightGramsTotal = p.packages.reduce(
-        (sum, pk) => sum + pk.weight_grams,
+      const weightGramsTotal = pickup.packages.reduce(
+        (sum, pkg) => sum + pkg.weight_grams,
         0,
       );
       return {
-        sellerProfileId: p.seller_profile_id,
+        sellerProfileId: pickup.seller_profile_id,
         address,
         weightGramsTotal,
-        packages: p.packages,
+        packages: pickup.packages,
       };
     });
 
+    logger.info({
+      msg: "shipping-quotes.pickups.resolved",
+      requestId,
+      pickups: pickupsResolved.map((pickup) => ({
+        seller_profile_id: pickup.sellerProfileId,
+        pickup_postal_code: pickup.address.postal_code,
+        weight_grams_total: pickup.weightGramsTotal,
+        packages_count: pickup.packages.length,
+      })),
+    });
+
     const result = await quoteMultiOriginSum({
-      pickups: pickupsResolved.map((p) => ({
-        sellerProfileId: p.sellerProfileId,
-        postalCode: p.address.postal_code,
-        weightGramsTotal: p.weightGramsTotal,
+      pickups: pickupsResolved.map((pickup) => ({
+        sellerProfileId: pickup.sellerProfileId,
+        postalCode: pickup.address.postal_code,
+        weightGramsTotal: pickup.weightGramsTotal,
       })),
       destinationPostalCode: body.to.postal_code,
       serviceLevel: body.service_level,
     });
 
+    logger.info({
+      msg: "shipping-quotes.engine.success",
+      requestId,
+      origins_count: result.originsCount,
+      discount_pct: result.discountPct,
+      total_gross_cents: result.totalGrossCents,
+      total_net_cents: result.totalNetCents,
+      per_origin: result.perOrigin.map((origin) => ({
+        seller_profile_id: origin.sellerProfileId,
+        carrier: origin.carrier,
+        net_cost_cents: origin.netCostCents,
+        estimated_days_min: origin.estimatedDaysMin,
+        estimated_days_max: origin.estimatedDaysMax,
+      })),
+    });
+
     const expiresAt = new Date(Date.now() + QUOTE_TTL_MS);
 
     const quotes = await prisma.$transaction(
-      result.perOrigin.map((r, idx) =>
+      result.perOrigin.map((origin, idx) =>
         prisma.shippingQuote.create({
           data: {
             id: generateId("qte"),
-            sellerProfileId: r.sellerProfileId,
+            sellerProfileId: origin.sellerProfileId,
             fromAddressSnapshot: pickupsResolved[idx].address as unknown as object,
             toAddressSnapshot: body.to as unknown as object,
             serviceLevel: body.service_level,
-            carrier: r.carrier,
-            costCents: r.netCostCents,
+            carrier: origin.carrier,
+            costCents: origin.netCostCents,
             weightGramsTotal: pickupsResolved[idx].weightGramsTotal,
             packagesCount: pickupsResolved[idx].packages.length,
             packagesSnapshot: pickupsResolved[idx].packages as unknown as object,
-            estimatedDaysMin: r.estimatedDaysMin,
-            estimatedDaysMax: r.estimatedDaysMax,
+            estimatedDaysMin: origin.estimatedDaysMin,
+            estimatedDaysMax: origin.estimatedDaysMax,
             idempotencyKey: idempotencyKey ? `${idempotencyKey}:${idx}` : null,
             expiresAt,
           },
         }),
       ),
     );
+
+    logger.info({
+      msg: "shipping-quotes.persist.success",
+      requestId,
+      quotes_created: quotes.length,
+      quote_ids: quotes.map((quote) => quote.id),
+    });
 
     return NextResponse.json(
       toQuoteResponseDTO({
@@ -153,6 +260,14 @@ export async function POST(req: NextRequest) {
       { status: 201 },
     );
   } catch (err) {
+    logger.error({
+      msg: "shipping-quotes.request.failed",
+      requestId,
+      error:
+        err instanceof Error
+          ? { name: err.name, message: err.message }
+          : String(err),
+    });
     return handleApiError(err);
   }
 }
