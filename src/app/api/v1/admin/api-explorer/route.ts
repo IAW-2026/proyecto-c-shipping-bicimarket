@@ -4,8 +4,8 @@
 // endpoints S2S que Shipping expone para otras apps.
 //
 // ¿Por qué un proxy? Los endpoints S2S (SH1–SH4) se autentican con
-// `X-Service-Token: INCOMING_SERVICE_TOKEN`, que es un secreto server-side y
-// NO puede viajar al navegador. Este handler:
+// `X-Service-Token` usando uno de los secretos entrantes válidos de Shipping,
+// que es server-side y NO puede viajar al navegador. Este handler:
 //   1. Verifica que el caller sea admin (Clerk JWT + requireAdmin).
 //   2. Valida que el path pedido esté en la allowlist del contrato S2S.
 //   3. Inyecta el X-Service-Token del lado del servidor y reenvía la llamada
@@ -68,12 +68,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const token = process.env.INCOMING_SERVICE_TOKEN;
+    const token =
+      process.env.BUYER_TO_SHIPPING_SERVICE_TOKEN ??
+      process.env.SELLER_TO_SHIPPING_SERVICE_TOKEN;
     if (!token) {
       throw new ApiError(
         "SERVER_MISCONFIGURED",
         500,
-        "INCOMING_SERVICE_TOKEN no está seteado; no se puede ejecutar la llamada S2S",
+        "No hay token entrante de Shipping configurado; revisar BUYER_TO_SHIPPING_SERVICE_TOKEN y SELLER_TO_SHIPPING_SERVICE_TOKEN",
       );
     }
 

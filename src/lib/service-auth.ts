@@ -1,20 +1,39 @@
 import { NextRequest, NextResponse } from "next/server";
 
-// Valida que la llamada entrante sea de otra app del marketplace.
-// Convención del proyecto: header X-Service-Token con el secret de esta app.
-// Cada par origen→destino comparte un secret; este endpoint solo conoce el suyo.
-export function requireServiceToken(req: NextRequest) {
-  const expected = process.env.INCOMING_SERVICE_TOKEN;
-  const received = req.headers.get("x-service-token");
+const SHIPPING_INBOUND_TOKENS = [
+  "BUYER_TO_SHIPPING_SERVICE_TOKEN",
+  "SELLER_TO_SHIPPING_SERVICE_TOKEN",
+] as const;
 
-  if (!expected) {
+const SHIPPING_OUTBOUND_TOKEN_BY_APP = {
+  buyer: "SHIPPING_TO_BUYER_SERVICE_TOKEN",
+  seller: "SHIPPING_TO_SELLER_SERVICE_TOKEN",
+  payments: "SHIPPING_TO_PAYMENTS_SERVICE_TOKEN",
+} as const;
+
+// Valida que la llamada entrante sea de otra app del marketplace.
+// Convención del proyecto: header X-Service-Token con el secret del par
+// origen→destino. Shipping acepta llamados entrantes desde Buyer y Seller.
+export function requireServiceToken(req: NextRequest) {
+  const received = req.headers.get("x-service-token");
+  const expectedTokens = SHIPPING_INBOUND_TOKENS.map((envName) => process.env[envName]).filter(
+    (value): value is string => Boolean(value),
+  );
+
+  if (expectedTokens.length === 0) {
     return NextResponse.json(
-      { error: { code: "SERVER_MISCONFIGURED", message: "INCOMING_SERVICE_TOKEN no está seteado" } },
+      {
+        error: {
+          code: "SERVER_MISCONFIGURED",
+          message:
+            "No hay tokens entrantes configurados; revisar BUYER_TO_SHIPPING_SERVICE_TOKEN y SELLER_TO_SHIPPING_SERVICE_TOKEN",
+        },
+      },
       { status: 500 }
     );
   }
 
-  if (!received || received !== expected) {
+  if (!received || !expectedTokens.includes(received)) {
     return NextResponse.json(
       { error: { code: "UNAUTHORIZED", message: "X-Service-Token inválido o ausente" } },
       { status: 401 }
@@ -39,10 +58,14 @@ export async function callServiceApi(
   opts: ServiceFetchOptions = {}
 ) {
   const baseUrl = process.env[`${app.toUpperCase()}_API_URL`];
-  const token = process.env[`${app.toUpperCase()}_SERVICE_TOKEN`];
+  const tokenEnvName =
+    app === "shipping" ? null : SHIPPING_OUTBOUND_TOKEN_BY_APP[app];
+  const token = tokenEnvName ? process.env[tokenEnvName] : undefined;
 
   if (!baseUrl || !token) {
-    throw new Error(`Falta config para llamar a ${app}: revisar ${app.toUpperCase()}_API_URL y ${app.toUpperCase()}_SERVICE_TOKEN`);
+    throw new Error(
+      `Falta config para llamar a ${app}: revisar ${app.toUpperCase()}_API_URL y ${tokenEnvName ?? "token saliente"}`,
+    );
   }
 
   const headers: Record<string, string> = {
