@@ -50,6 +50,14 @@ async function fetchPickupAddress(sellerProfileId: string, requestId: string) {
         seller_profile_id: sellerProfileId,
         target: "seller",
         cause: String(err),
+        infoSellerApi: {
+          endpoint: "/api/v1/seller-profile/{seller_profile_id}/pickup-address",
+          expected_response: "200 OK con { pickup_address: { postal_code, city, province } }",
+          real_response: err instanceof Response ? {
+            status: err.status,
+            body: await err.text().catch(() => "<unavailable>"),
+          } : "<unavailable>",
+        },
       },
     );
   }
