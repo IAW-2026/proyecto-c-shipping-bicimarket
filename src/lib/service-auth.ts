@@ -47,6 +47,7 @@ type ServiceFetchOptions = {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
   idempotencyKey?: string;
+  timeoutMs?: number;
 };
 
 // Wrapper para llamar a otra app del marketplace.
@@ -77,6 +78,7 @@ export async function callServiceApi(
 
   const url = `${baseUrl}${path}`;
   const delays = [1000, 3000, 9000];
+  const timeoutMs = opts.timeoutMs ?? 15_000;
   let lastError: unknown;
 
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -85,7 +87,7 @@ export async function callServiceApi(
         method: opts.method ?? "GET",
         headers,
         body: opts.body ? JSON.stringify(opts.body) : undefined,
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(timeoutMs),
       });
 
       if (res.status >= 500) {
