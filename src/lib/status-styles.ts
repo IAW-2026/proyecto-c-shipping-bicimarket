@@ -140,6 +140,6 @@ export const OPERATOR_TRANSITIONS: Record<ShipmentStatus, OperatorTransition> = 
     action: "open-deliver-sheet",
   },
   delivered: { label: "Envío finalizado", action: "none" },
-  failed_delivery: { label: "Reintentar", action: "mutate-out-for-delivery" },
+  failed_delivery: { label: "Reintentar", action: "mutate-in-transit" },
   returned: { label: "Devuelto", action: "none" },
 };

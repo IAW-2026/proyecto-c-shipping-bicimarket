@@ -68,7 +68,7 @@ export function useShipmentMutations(shipmentId: string) {
         myAssignmentsKey,
         adminListKey,
       ],
-      successMessage: "Reintento creado: nuevo envío listo para retirar",
+      successMessage: "Envío reintentado y nuevamente en tránsito",
     }),
 
     patchStatus: useApiMutation({

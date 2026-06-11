@@ -39,7 +39,7 @@ interface OriginPickupRowProps {
  *   - in_transit       → "En reparto" (avance directo)
  *   - out_for_delivery → "Entregar" (abre DeliveryConfirmSheet — cada
  *     shipment necesita su propio proof, ADR-005 sprint 1)
- *   - failed_delivery  → "Reintentar" (/retry: nuevo envío en el grupo)
+ *   - failed_delivery  → "Reintentar" (vuelve a in_transit)
  *   - delivered / returned → status pill + link al detalle
  */
 export function OriginPickupRow({

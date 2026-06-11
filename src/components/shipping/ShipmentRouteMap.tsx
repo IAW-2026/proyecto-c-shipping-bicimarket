@@ -271,7 +271,7 @@ export function ShipmentRouteMap({
             <p className="text-[11px] text-destructive/80">
               {status === "returned"
                 ? "El envío no se pudo entregar tras los intentos y se devolvió."
-                : "No se pudo entregar. Podés crear un nuevo envío con los mismos datos para reintentar."}
+                : "No se pudo entregar. Podés reintentar el mismo envío para volverlo a poner en tránsito."}
             </p>
           </div>
           {failureAction && <div className="shrink-0">{failureAction}</div>}

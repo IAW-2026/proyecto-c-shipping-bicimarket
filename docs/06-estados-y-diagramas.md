@@ -55,7 +55,10 @@ sequenceDiagram
     SH-->>P: POST /api/v1/internal/shipment-delivered
 ```
 
-Si el segundo intento también falla y se acumulan 3 intentos, el shipment pasa a `returned` y se dispara el flujo de reembolso (gestionado por Payments — fuera del scope de Shipping).
+Al acumular 3 eventos `failed_delivery`, el mismo request registra primero el
+fallo y luego aplica automáticamente `failed_delivery → returned`. Se crean
+ambos registros de historial y el estado final `returned` se notifica a
+Buyer/Seller. El reembolso posterior es responsabilidad de Payments.
 
 > **Sprint 1 (ADR-002)**: las flechas salientes `SH-->>` están diferidas — se reemplazan por logs `outbound-deferred`. La lógica de transición local funciona igual.
 

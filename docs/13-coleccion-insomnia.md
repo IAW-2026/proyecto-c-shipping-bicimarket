@@ -44,7 +44,7 @@
 | `PATCH` | `/api/v1/my/operator` | Editar phone / DNI / vehicle / patente. |
 | `POST` | `/api/v1/shipments/{id}/tracking-events` | Avanzar estado (picked_up, in_transit, out_for_delivery, failed_delivery). Auto-asign si está disponible. |
 | `POST` | `/api/v1/shipments/{id}/deliver` | Confirmar entrega con `proof_photo_url`. |
-| `POST` | `/api/v1/shipments/{id}/retry` | Crear nuevo envío como copia de uno fallido. |
+| `POST` | `/api/v1/shipments/{id}/retry` | Reintentar el mismo envío: `failed_delivery → in_transit`. |
 | `POST` | `/api/v1/uploads/delivery-proof` | Sube foto a Supabase Storage. Body: `multipart/form-data` con campo `file`. Devuelve `{ url, content_type, size }`. |
 
 ### Admin (JWT Clerk con `publicMetadata.admin=true`)

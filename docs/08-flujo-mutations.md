@@ -21,7 +21,9 @@ Componente ("use client")
 ← UI se refresca automáticamente
 ```
 
-**Sprint 1 (ADR-002)**: cualquier outbound a otras apps tras la mutación (notificar a Buyer/Seller/Payments) está **diferido** — se reemplaza por `logger.info({ level: "outbound-deferred", target, payload })` dentro del route handler. La lógica local se ejecuta igual.
+Los outbounds a Buyer/Seller/Payments se ejecutan después del commit local.
+`callServiceApi` aplica los reintentos y `Promise.allSettled` evita que una
+caída externa revierta una transición física ya confirmada.
 
 ---
 
@@ -247,7 +249,7 @@ export async function patchShipmentStatus(
 
 ---
 
-## 4. Route Handler — Prisma directo + outbound diferido
+## 4. Route Handler — Prisma directo + outbound tolerante a fallos
 
 **Archivo:** `src/app/api/v1/shipments/[shipmentId]/tracking-events/route.ts`
 
@@ -367,7 +369,9 @@ export async function POST(
 - Valida body con **zod** y mapea errores a `ApiError("BAD_REQUEST", 400, ..., { issues })`.
 - Valida transición de estado con `assertTransition` (ver `lib/transitions.ts` — ticket T03).
 - **`prisma.$transaction`** atómica para todo lo que tiene que persistirse junto (event + status update + history).
-- **Outbound diferido**: en lugar de llamar a otras apps con `callServiceApi`, hace `logger.info({ level: "outbound-deferred", ... })`. Deja el payload exacto que se enviaría — facilita el switch en sprint 2.
+- **Outbound post-commit**: llama a las otras apps con `callServiceApi` dentro
+  de `Promise.allSettled`. Los fallos agotados se registran como
+  `outbound-failed`, sin cambiar la respuesta exitosa de la transición local.
 - Errores siempre via `handleApiError(err)` — devuelve el shape `{ error: { code, message, details } }`.
 
 > **Sprint 2** — cuando se reactiven los outbounds, el patrón es:
@@ -380,7 +384,10 @@ export async function POST(
 >   callServiceApi("seller", ...),
 > ]);
 > ```
-> `allSettled` garantiza que un destino caído no rollbackee el cambio local — el envío está físicamente entregado, no se puede "des-entregar" porque Buyer esté caído. Los fallos se loguean con `level: "outbound-failed"` para reintento manual / job.
+`allSettled` garantiza que un destino caído no rollbackee el cambio local: el
+estado físico confirmado en Shipping sigue siendo la fuente de verdad. Los
+fallos se loguean con `level: "outbound-failed"` para reintento manual o job.
+Este es el comportamiento implementado por `notifyShipmentStatus`.
 
 ---
 
@@ -430,7 +437,8 @@ Para agregar una mutation nueva:
    - `zod.safeParse(await request.json())`.
    - `assertTransition` si cambia status.
    - `prisma.$transaction(async tx => { ... })` para escrituras múltiples.
-   - **Outbound diferido** con `logger.info({ level: "outbound-deferred", ... })` (sprint 1).
+   - **Outbound post-commit** con `callServiceApi` + `Promise.allSettled` y log
+     `outbound-failed`.
    - Cierre con `handleApiError(err)`.
 3. **Service** en `src/services/api/{dominio}.ts` — función `async` con `api.post/patch/delete` tipada. `Idempotency-Key` cuando crea recurso.
 4. **Hook agrupado** en `src/hooks/querys/{dominio}/use{Dominio}Mutations.ts` — agregá la acción al objeto retornado con `useApiMutation`.

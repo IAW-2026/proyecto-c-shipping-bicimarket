@@ -18,11 +18,11 @@ import { assertTransition } from "@/lib/transitions";
 import { callServiceApi } from "@/lib/service-auth";
 import { recomputeGroupStatus } from "@/lib/group-status";
 import type { DeliverShipmentResponse } from "@/types/tracking-events";
-import type { BuyerOrderShippingPatchBody } from "@/types/external/buyer";
 import type {
   PaymentsShipmentDeliveredBody,
-  SellerSalesOrderShippingStatusPatchBody,
 } from "@/types/external/payments";
+import { notifyShipmentStatus } from "@/lib/shipment-outbound";
+import { logger } from "@/lib/logger";
 
 export async function POST(
   req: NextRequest,
@@ -40,9 +40,44 @@ export async function POST(
 
     const shipment = await prisma.shipment.findUnique({
       where: { id: shipmentId },
-      include: { group: { select: { trackingNumber: true } } },
+      include: {
+        group: {
+          select: {
+            trackingNumber: true,
+            assignedOperatorClerkUserId: true,
+          },
+        },
+      },
     });
     if (!shipment) throw new ApiError("NOT_FOUND", 404, "Shipment inexistente");
+
+    if (shipment.group.assignedOperatorClerkUserId !== operator.clerkUserId) {
+      throw new ApiError(
+        "FORBIDDEN",
+        403,
+        "Solo el operador asignado al pedido puede confirmar la entrega",
+      );
+    }
+
+    if (shipment.status === ShipmentStatus.delivered) {
+      const existingProof = await prisma.deliveryProof.findUnique({
+        where: { shipmentId },
+      });
+      if (existingProof) {
+        return NextResponse.json({
+          shipment_id: shipment.id,
+          status: "delivered",
+          delivered_at:
+            shipment.deliveredAt?.toISOString() ??
+            existingProof.deliveredAt.toISOString(),
+          proof: {
+            photo_url: existingProof.proofPhotoUrl,
+            signature_url: existingProof.signatureImageUrl,
+            note: existingProof.note,
+          },
+        } satisfies DeliverShipmentResponse);
+      }
+    }
 
     assertTransition(shipment.status as ShipmentStatus, ShipmentStatus.delivered);
 
@@ -115,18 +150,6 @@ export async function POST(
     });
 
     const occurredAtIso = occurredAt.toISOString();
-    const buyerBody: BuyerOrderShippingPatchBody = {
-      status: "delivered",
-      shipping_status: "delivered",
-      shipment_id: shipment.id,
-      tracking_number: shipment.group.trackingNumber,
-      occurred_at: occurredAtIso,
-    };
-    const sellerBody: SellerSalesOrderShippingStatusPatchBody = {
-      shipping_status: "delivered",
-      shipment_id: shipment.id,
-      occurred_at: occurredAtIso,
-    };
     const paymentsBody: PaymentsShipmentDeliveredBody = {
       shipment_id: shipment.id,
       order_id: shipment.orderId,
@@ -136,55 +159,41 @@ export async function POST(
       delivered_at: occurredAtIso,
     };
 
-    try {
-      const [buyerRes, sellerRes, paymentsRes] = await Promise.all([
-        callServiceApi(
-          "buyer",
-          `/api/v1/orders/${shipment.orderId}/seller-groups/${shipment.orderSellerGroupId}/shipping`,
-          { method: "PATCH", body: buyerBody },
-        ),
-        callServiceApi(
-          "seller",
-          `/api/v1/sales-orders/${shipment.salesOrderId}/shipping-status`,
-          { method: "PATCH", body: sellerBody },
-        ),
-        callServiceApi("payments", "/api/v1/internal/shipment-delivered", {
-          method: "POST",
-          body: paymentsBody,
-        }),
-      ]);
+    await notifyShipmentStatus({
+      shipmentId: shipment.id,
+      shipmentStatus: ShipmentStatus.delivered,
+      orderId: shipment.orderId,
+      orderSellerGroupId: shipment.orderSellerGroupId,
+      salesOrderId: shipment.salesOrderId,
+      orderTrackingNumber: shipment.group.trackingNumber,
+      occurredAt: occurredAtIso,
+    });
 
-      if (!buyerRes.ok) {
-        throw new ApiError("UPSTREAM_ERROR", 502, "Buyer rechazo la entrega", {
-          target: "buyer",
-          upstream_status: buyerRes.status,
-          shipment_id: shipment.id,
-        });
-      }
-      if (!sellerRes.ok) {
-        throw new ApiError("UPSTREAM_ERROR", 502, "Seller rechazo la entrega", {
-          target: "seller",
-          upstream_status: sellerRes.status,
-          shipment_id: shipment.id,
-        });
-      }
-      if (!paymentsRes.ok) {
-        throw new ApiError(
-          "UPSTREAM_ERROR",
-          502,
-          "Payments rechazo la liquidacion por entrega",
-          {
-            target: "payments",
-            upstream_status: paymentsRes.status,
-            shipment_id: shipment.id,
-          },
-        );
-      }
-    } catch (err) {
-      if (err instanceof ApiError) throw err;
-      throw new ApiError("UPSTREAM_ERROR", 502, "Fallo la propagacion de la entrega", {
-        shipment_id: shipment.id,
-        cause: String(err),
+    const paymentsPath = "/api/v1/internal/shipment-delivered";
+    const [paymentsResult] = await Promise.allSettled([
+      callServiceApi("payments", paymentsPath, {
+        method: "POST",
+        body: paymentsBody,
+        idempotencyKey: `shipment-delivered:${shipment.id}`,
+      }),
+    ]);
+    if (paymentsResult.status === "rejected") {
+      logger.outboundFailed({
+        target: "payments",
+        method: "POST",
+        path: paymentsPath,
+        payload: paymentsBody,
+        shipmentId: shipment.id,
+        cause: String(paymentsResult.reason),
+      });
+    } else if (!paymentsResult.value.ok) {
+      logger.outboundFailed({
+        target: "payments",
+        method: "POST",
+        path: paymentsPath,
+        payload: paymentsBody,
+        shipmentId: shipment.id,
+        upstreamStatus: paymentsResult.value.status,
       });
     }
 

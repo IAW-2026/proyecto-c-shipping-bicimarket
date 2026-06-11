@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
-import { callServiceApi, requireServiceToken } from "@/lib/service-auth";
+import { requireServiceToken } from "@/lib/service-auth";
 import { getActiveOperator } from "@/lib/auth-helpers";
 import { generateId } from "@/lib/ids";
 import { ApiError, handleApiError } from "@/lib/api-error";
@@ -22,93 +22,9 @@ import {
   TrackingEventType,
 } from "@/generated/prisma/client";
 import { recomputeGroupStatus } from "@/lib/group-status";
-import type { BuyerOrderShippingPatchBody } from "@/types/external/buyer";
-import type { SellerSalesOrderShippingStatusPatchBody } from "@/types/external/payments";
+import { notifyShipmentStatus } from "@/lib/shipment-outbound";
 
-type NotifiableShipmentStatus = BuyerOrderShippingPatchBody["shipping_status"];
-
-function mapBuyerGroupStatus(
-  status: NotifiableShipmentStatus,
-): BuyerOrderShippingPatchBody["status"] | null {
-  switch (status) {
-    case ShipmentStatus.ready_for_pickup:
-    case ShipmentStatus.picked_up:
-      return "ready_to_ship";
-    case ShipmentStatus.in_transit:
-    case ShipmentStatus.out_for_delivery:
-    case ShipmentStatus.failed_delivery:
-    case ShipmentStatus.returned:
-      return "in_transit";
-    case ShipmentStatus.delivered:
-      return "delivered";
-    default:
-      return null;
-  }
-}
-
-async function propagateShipmentStatus(params: {
-  shipmentId: string;
-  shipmentStatus: NotifiableShipmentStatus;
-  orderId: string;
-  orderSellerGroupId: string;
-  salesOrderId: string;
-  orderTrackingNumber: string;
-  occurredAt: string;
-}) {
-  const buyerStatus = mapBuyerGroupStatus(params.shipmentStatus);
-  if (!buyerStatus) return;
-
-  const buyerBody: BuyerOrderShippingPatchBody = {
-    status: buyerStatus,
-    shipping_status: params.shipmentStatus,
-    shipment_id: params.shipmentId,
-    tracking_number: params.orderTrackingNumber,
-    occurred_at: params.occurredAt,
-  };
-
-  const sellerBody: SellerSalesOrderShippingStatusPatchBody = {
-    shipping_status: params.shipmentStatus,
-    shipment_id: params.shipmentId,
-    occurred_at: params.occurredAt,
-  };
-
-  try {
-    const [buyerRes, sellerRes] = await Promise.all([
-      callServiceApi(
-        "buyer",
-        `/api/v1/orders/${params.orderId}/seller-groups/${params.orderSellerGroupId}/shipping`,
-        { method: "PATCH", body: buyerBody },
-      ),
-      callServiceApi(
-        "seller",
-        `/api/v1/sales-orders/${params.salesOrderId}/shipping-status`,
-        { method: "PATCH", body: sellerBody },
-      ),
-    ]);
-
-    if (!buyerRes.ok) {
-      throw new ApiError("UPSTREAM_ERROR", 502, "Buyer rechazo la actualizacion de envio", {
-        target: "buyer",
-        upstream_status: buyerRes.status,
-        shipment_id: params.shipmentId,
-      });
-    }
-
-    if (!sellerRes.ok) {
-      throw new ApiError("UPSTREAM_ERROR", 502, "Seller rechazo la actualizacion de envio", {
-        target: "seller",
-        upstream_status: sellerRes.status,
-        shipment_id: params.shipmentId,
-      });
-    }
-  } catch (err) {
-    if (err instanceof ApiError) throw err;
-    throw new ApiError("UPSTREAM_ERROR", 502, "Fallo la propagacion del estado de envio", {
-      shipment_id: params.shipmentId,
-      cause: String(err),
-    });
-  }
-}
+const MAX_FAILED_DELIVERY_ATTEMPTS = 3;
 
 export async function POST(
   req: NextRequest,
@@ -170,7 +86,41 @@ export async function POST(
       }
     }
 
-    const { event } = await prisma.$transaction(async (tx) => {
+    if (
+      operatorClerkUserId &&
+      shipment.group.assignedOperatorClerkUserId &&
+      shipment.group.assignedOperatorClerkUserId !== operatorClerkUserId
+    ) {
+      throw new ApiError(
+        "FORBIDDEN",
+        403,
+        "Solo el operador asignado al pedido puede cambiar su estado",
+      );
+    }
+
+    if (
+      operatorClerkUserId &&
+      !shipment.group.assignedOperatorClerkUserId &&
+      body.event_type !== TrackingEventType.picked_up
+    ) {
+      throw new ApiError(
+        "FORBIDDEN",
+        403,
+        "El pedido debe ser tomado antes de cambiar su estado",
+      );
+    }
+
+    if (nextStatus === shipment.status) {
+      const existingEvent = await prisma.trackingEvent.findFirst({
+        where: { shipmentId, eventType: body.event_type },
+        orderBy: { occurredAt: "desc" },
+      });
+      if (existingEvent) {
+        return NextResponse.json(toTrackingEventDTO(existingEvent));
+      }
+    }
+
+    const { event, finalStatus } = await prisma.$transaction(async (tx) => {
       if (shouldClaimGroup && operatorClerkUserId) {
         const groupGuard = await tx.shipmentGroup.updateMany({
           where: {
@@ -214,10 +164,17 @@ export async function POST(
             );
           }
         } else {
-          await tx.shipment.update({
-            where: { id: shipmentId },
+          const guard = await tx.shipment.updateMany({
+            where: { id: shipmentId, status: shipment.status },
             data: { status: nextStatus },
           });
+          if (guard.count === 0) {
+            throw new ApiError(
+              "INVALID_TRANSITION",
+              409,
+              "El estado del envio cambio mientras se procesaba la operacion",
+            );
+          }
         }
       }
 
@@ -232,6 +189,7 @@ export async function POST(
         },
       });
 
+      let persistedStatus = nextStatus ?? (shipment.status as ShipmentStatus);
       if (nextStatus && nextStatus !== shipment.status) {
         await tx.shipmentStatusHistory.create({
           data: {
@@ -244,16 +202,60 @@ export async function POST(
           },
         });
 
+        if (nextStatus === ShipmentStatus.failed_delivery) {
+          const failedAttempts = await tx.trackingEvent.count({
+            where: {
+              shipmentId,
+              eventType: TrackingEventType.failed_delivery,
+            },
+          });
+
+          if (failedAttempts >= MAX_FAILED_DELIVERY_ATTEMPTS) {
+            assertTransition(
+              ShipmentStatus.failed_delivery,
+              ShipmentStatus.returned,
+            );
+            await tx.shipment.update({
+              where: { id: shipmentId },
+              data: { status: ShipmentStatus.returned },
+            });
+            await tx.trackingEvent.create({
+              data: {
+                id: generateId("evt"),
+                shipmentId,
+                eventType: TrackingEventType.returned,
+                note: `Devolucion automatica tras ${failedAttempts} intentos fallidos`,
+                occurredAt: new Date(body.occurred_at),
+              },
+            });
+            await tx.shipmentStatusHistory.create({
+              data: {
+                id: generateId("ssh"),
+                shipmentId,
+                fromStatus: ShipmentStatus.failed_delivery,
+                toStatus: ShipmentStatus.returned,
+                source: StatusHistorySource.system,
+                payload: { failed_attempts: failedAttempts },
+                occurredAt: new Date(body.occurred_at),
+              },
+            });
+            persistedStatus = ShipmentStatus.returned;
+          }
+        }
+
         await recomputeGroupStatus(tx, shipment.shipmentGroupId);
       }
 
-      return { event: ev };
+      return { event: ev, finalStatus: persistedStatus };
     });
 
-    if (nextStatus) {
-      await propagateShipmentStatus({
+    if (nextStatus && nextStatus !== shipment.status) {
+      await notifyShipmentStatus({
         shipmentId: shipment.id,
-        shipmentStatus: nextStatus as NotifiableShipmentStatus,
+        shipmentStatus: finalStatus as Exclude<
+          ShipmentStatus,
+          typeof ShipmentStatus.created
+        >,
         orderId: shipment.orderId,
         orderSellerGroupId: shipment.orderSellerGroupId,
         salesOrderId: shipment.salesOrderId,

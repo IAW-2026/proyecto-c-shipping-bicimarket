@@ -1,6 +1,5 @@
 "use client";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 import {
   ChevronLeft,
@@ -47,7 +46,6 @@ interface ShipmentAdminDetailProps {
 }
 
 export function ShipmentAdminDetail({ shipmentId }: ShipmentAdminDetailProps) {
-  const router = useRouter();
   const [assignOpen, setAssignOpen] = useState(false);
   const [overrideOpen, setOverrideOpen] = useState(false);
 
@@ -68,7 +66,7 @@ export function ShipmentAdminDetail({ shipmentId }: ShipmentAdminDetailProps) {
 
   function handleRetry() {
     retry.mutate(shipmentId, {
-      onSuccess: (created) => router.push(`/admin/shipments/${created.id}`),
+      onSuccess: () => refetch(),
     });
   }
 
@@ -214,7 +212,7 @@ export function ShipmentAdminDetail({ shipmentId }: ShipmentAdminDetailProps) {
               className="border-destructive/40 text-destructive hover:bg-destructive/15"
             >
               <RefreshCcw className="size-3.5" />
-              {retry.isPending ? "Creando…" : "Crear nuevo envío"}
+              {retry.isPending ? "Reintentando..." : "Reintentar entrega"}
             </Button>
           ) : null
         }
@@ -546,4 +544,3 @@ function StaticField({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
-

@@ -65,4 +65,16 @@ export const logger = {
   }) {
     emit("outbound-deferred", payload as unknown as Record<string, unknown>);
   },
+  outboundFailed(payload: {
+    target: "buyer" | "seller" | "payments";
+    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+    path: string;
+    payload?: unknown;
+    shipmentId?: string;
+    upstreamStatus?: number;
+    cause?: string;
+    requestId?: string;
+  }) {
+    emit("outbound-failed", payload as unknown as Record<string, unknown>);
+  },
 };

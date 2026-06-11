@@ -1,5 +1,5 @@
 // Body de POST /api/v1/internal/shipment-delivered de Payments App (docs/03 §CR4).
-// Sprint 1 se loguea como outbound-deferred; sprint 2 se llama con callServiceApi.
+// Se envia con callServiceApi despues de confirmar la entrega local.
 
 export interface PaymentsShipmentDeliveredBody {
   shipment_id: string;

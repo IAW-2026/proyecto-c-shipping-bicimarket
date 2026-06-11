@@ -1,6 +1,5 @@
 "use client";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { ChevronLeft, Info, RefreshCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -39,7 +38,6 @@ export function OperatorShipmentDetail({
   shipmentId,
   operatorStatus,
 }: OperatorShipmentDetailProps) {
-  const router = useRouter();
   const { data: shipment, isLoading, isError, refetch } = useShipment(shipmentId);
   const { data: trackingEvents } = useTrackingEvents(shipmentId);
   const retry = useRetryShipment();
@@ -47,11 +45,7 @@ export function OperatorShipmentDetail({
 
   function handleRetry() {
     retry.mutate(shipmentId, {
-      onSuccess: () => {
-        // Volvemos al listado — el nuevo envío aparece como "Disponible"
-        // para que cualquier operador (incluido este) lo tome.
-        router.push("/dashboard/assignments");
-      },
+      onSuccess: () => refetch(),
     });
   }
 
@@ -189,7 +183,7 @@ export function OperatorShipmentDetail({
               className="border-destructive/40 text-destructive hover:bg-destructive/15"
             >
               <RefreshCcw className="size-3.5" />
-              {retry.isPending ? "Creando…" : "Crear nuevo envío"}
+              {retry.isPending ? "Reintentando..." : "Reintentar entrega"}
             </Button>
           ) : null
         }
@@ -270,8 +264,8 @@ export function OperatorShipmentDetail({
  * estados desde los que la transición a failed_delivery es válida
  * (in_transit, out_for_delivery — ver lib/transitions.ts).
  *
- * Después de marcar fallida, el banner rojo del mapa muestra el botón
- * "Crear nuevo envío" que clona el shipment para que otro operador lo tome.
+ * Después de marcar fallida, el banner permite volver el mismo shipment
+ * a in_transit para iniciar otro intento.
  */
 function FailureToggleButton({
   shipmentId,

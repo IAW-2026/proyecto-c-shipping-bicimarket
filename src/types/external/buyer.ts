@@ -1,5 +1,5 @@
 // Body que Shipping ENVÍA a Buyer en PATCH /api/v1/orders/{id}/seller-groups/{g}/shipping
-// (docs/03 §CR2). Sprint 1 no se envía — se loguea como outbound-deferred.
+// (docs/03 §CR2). Se envia despues de confirmar la transicion local.
 
 export interface BuyerOrderShippingPatchBody {
   status: "ready_to_ship" | "in_transit" | "delivered";

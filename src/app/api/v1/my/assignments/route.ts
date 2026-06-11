@@ -21,6 +21,7 @@ const ACTIVE_SHIPMENT_STATUSES = [
   ShipmentStatus.picked_up,
   ShipmentStatus.in_transit,
   ShipmentStatus.out_for_delivery,
+  ShipmentStatus.failed_delivery,
 ];
 
 type ShipmentWithGroupAndPackages = Shipment & {

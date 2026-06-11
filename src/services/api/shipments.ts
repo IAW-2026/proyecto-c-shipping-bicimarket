@@ -184,10 +184,7 @@ export async function createAdminShipment(
   return res.data;
 }
 
-/**
- * Reintenta un envío fallido creando uno nuevo con los mismos datos.
- * El original pasa a `returned` y el nuevo arranca en `ready_for_pickup`.
- */
+/** Reintenta un envio fallido moviendo el mismo shipment a `in_transit`. */
 export async function retryShipment(shipmentId: string): Promise<ShipmentDTO> {
   const res = await api.post<ShipmentDTO>(
     `/v1/shipments/${shipmentId}/retry`,

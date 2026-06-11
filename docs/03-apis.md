@@ -304,7 +304,10 @@ Si el evento cambia el `status` del shipment, Shipping notifica:
 
 Las transiciones inválidas se rechazan con `409 INVALID_TRANSITION` y `details: { from, to, allowed }` (ver `06-estados-y-diagramas.md §3`).
 
-> **Sprint 1 (ADR-002)**: notificaciones salientes diferidas; se reemplazan por `logger.info({ level: "outbound-deferred", target, payload })`.
+Las notificaciones se ejecutan después del commit local con `Promise.allSettled`.
+Cada destino aplica hasta 3 intentos mediante `callServiceApi`. Un fallo externo
+no revierte el estado físico del envío ni cambia la respuesta exitosa al
+operador; se registra como `outbound-failed` para replay manual o por job.
 
 ### `GET /api/v1/shipments/{shipmentId}/tracking-events`
 **Response 200**: lista paginada, orden cronológico.
@@ -318,6 +321,15 @@ Las transiciones inválidas se rechazan con `409 INVALID_TRANSITION` y `details:
   "pagination": { "total": 2, "page": 1, "limit": 20, "has_more": false }
 }
 ```
+
+### `POST /api/v1/shipments/{shipmentId}/retry`
+**Auth**: operador logístico activo asignado al pedido o `admin`.
+
+Reintenta el mismo shipment aplicando la transición normativa
+`failed_delivery → in_transit`. Crea el tracking event y el status history,
+recalcula el rollup del grupo y notifica a Buyer/Seller.
+
+**Response 200**: shipment actualizado.
 
 ### `POST /api/v1/shipments/{shipmentId}/deliver`
 Atómico: crea `tracking_event=delivered` + `delivery_proof` + setea `shipment.status=delivered`.
@@ -355,7 +367,9 @@ Tras el delivered, Shipping notifica:
 - A Seller: `PATCH /api/v1/sales-orders/{id}/shipping-status` (§CR3).
 - A Payments: `POST /api/v1/internal/shipment-delivered` (§CR4 — gatilla settlement).
 
-> **Sprint 1 (ADR-002)**: las 3 llamadas diferidas → logs `outbound-deferred`.
+Las tres notificaciones se ejecutan después del commit local. Los fallos se
+registran como `outbound-failed` y no revierten una entrega físicamente
+confirmada.
 
 ---
 
@@ -455,7 +469,9 @@ Sin paginación: la lista es chica (~230 entradas, <30KB) y se ordena por provin
 
 # Contratos referenciados (endpoints de OTRAS apps que Shipping toca)
 
-> Estos endpoints **NO los implementa Shipping**; los implementan las apps respectivas. Acá quedan documentados los contratos porque Shipping los llama (o los llamará en sprint 2). Para el parcial (ADR-002), las llamadas salientes están reemplazadas por `logger.info({ level: "outbound-deferred", target, payload })` con el payload que se hubiera enviado.
+Estos endpoints **NO los implementa Shipping**; los implementan las apps
+respectivas. Shipping los llama con `X-Service-Token` después de confirmar el
+cambio local. Los fallos agotados se registran como `outbound-failed`.
 
 ## CR1. Hidratar dirección de retiro (vive en Seller App)
 
