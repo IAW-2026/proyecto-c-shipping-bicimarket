@@ -505,13 +505,32 @@ cambio local. Los fallos agotados se registran como `outbound-failed`.
 **Request**
 ```json
 {
+  "status": "in_transit",
   "shipping_status": "in_transit",
   "shipment_id": "shp_01H…",
   "tracking_number": "BMK-1234567890",
-  "occurred_at": "2026-04-26T08:10:00Z"
+  "tracking_url": "https://shipping.bicimarket/track/BMK-1234567890"
 }
 ```
-`shipping_status`: `ready_for_pickup` | `picked_up` | `in_transit` | `out_for_delivery` | `delivered` | `failed_delivery` | `returned`.
+`status` es obligatorio: `preparing` | `ready_to_ship` | `in_transit` |
+`delivered`. Buyer lo transforma internamente a su enum Prisma
+`SellerGroupStatus`.
+
+`shipping_status` es opcional: `created` | `ready_for_pickup` | `picked_up` |
+`in_transit` | `out_for_delivery` | `delivered` | `failed_delivery` |
+`returned`.
+
+`shipment_id`, `tracking_number` y `tracking_url` son opcionales para Buyer.
+Shipping envía siempre los dos primeros; `tracking_url` solo cuando dispone de
+una URL real.
+
+Mapeo aplicado por Shipping:
+
+| `shipping_status` | `status` enviado a Buyer |
+|---|---|
+| `ready_for_pickup` | `ready_to_ship` |
+| `picked_up`, `in_transit`, `out_for_delivery`, `failed_delivery`, `returned` | `in_transit` |
+| `delivered` | `delivered` |
 
 > **ADR-006**: `tracking_number` aquí es el tracking GLOBAL del pedido (`BMK-…`) — el que el comprador usa para seguir su pedido completo. CR3 (Seller) y CR4 (Payments) siguen siendo por `shipment`/`sales_order`/`order_seller_group` (la liquidación es por vendedor; no cambia).
 

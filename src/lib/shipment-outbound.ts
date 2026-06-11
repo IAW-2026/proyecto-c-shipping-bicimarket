@@ -4,7 +4,8 @@ import { callServiceApi } from "@/lib/service-auth";
 import type { BuyerOrderShippingPatchBody } from "@/types/external/buyer";
 import type { SellerSalesOrderShippingStatusPatchBody } from "@/types/external/payments";
 
-type NotifiableShipmentStatus = BuyerOrderShippingPatchBody["shipping_status"];
+type NotifiableShipmentStatus =
+  SellerSalesOrderShippingStatusPatchBody["shipping_status"];
 
 interface ShipmentNotificationContext {
   shipmentId: string;
@@ -13,6 +14,7 @@ interface ShipmentNotificationContext {
   orderSellerGroupId: string;
   salesOrderId: string;
   orderTrackingNumber: string;
+  trackingUrl?: string;
   occurredAt: string;
 }
 
@@ -21,8 +23,9 @@ function mapBuyerGroupStatus(
 ): BuyerOrderShippingPatchBody["status"] {
   switch (status) {
     case ShipmentStatus.ready_for_pickup:
-    case ShipmentStatus.picked_up:
       return "ready_to_ship";
+    case ShipmentStatus.picked_up:
+      return "in_transit";
     case ShipmentStatus.delivered:
       return "delivered";
     default:
@@ -82,7 +85,7 @@ export async function notifyShipmentStatus(
     shipping_status: context.shipmentStatus,
     shipment_id: context.shipmentId,
     tracking_number: context.orderTrackingNumber,
-    occurred_at: context.occurredAt,
+    ...(context.trackingUrl ? { tracking_url: context.trackingUrl } : {}),
   };
   const sellerBody: SellerSalesOrderShippingStatusPatchBody = {
     shipping_status: context.shipmentStatus,
