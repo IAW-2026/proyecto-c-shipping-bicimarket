@@ -12,9 +12,13 @@ import { generateId, generateTrackingNumber, generateGroupTrackingNumber } from 
 import { ApiError, handleApiError } from "@/lib/api-error";
 import { paginate } from "@/lib/pagination";
 import { toShipmentDTO } from "@/lib/dto";
+import { findMatchingRate } from "@/lib/quote-engine";
+import { fetchSellerPickupAddress } from "@/lib/seller-pickup";
 import { createShipmentSchema } from "@/validation/shipments";
 import { ShipmentStatus, TrackingEventType, StatusHistorySource } from "@/generated/prisma/client";
 import type { Prisma } from "@/generated/prisma/client";
+
+const QUOTE_TTL_MS = 60 * 60 * 1000;
 
 // ── POST ───────────────────────────────────────────────────────────────────
 
@@ -25,6 +29,7 @@ export async function POST(req: NextRequest) {
 
     const body = createShipmentSchema.parse(await req.json());
     const idempotencyKey = req.headers.get("idempotency-key");
+    const requestId = req.headers.get("x-request-id") ?? crypto.randomUUID();
 
     if (idempotencyKey) {
       const existing = await prisma.shipment.findUnique({
@@ -37,16 +42,18 @@ export async function POST(req: NextRequest) {
     }
 
     // Validar quote no vencida
-    const quote = await prisma.shippingQuote.findUnique({
-      where: { id: body.shipping_quote_id },
-    });
-    if (!quote) {
+    const existingQuote = body.shipping_quote_id
+      ? await prisma.shippingQuote.findUnique({
+          where: { id: body.shipping_quote_id },
+        })
+      : null;
+    if (body.shipping_quote_id && !existingQuote) {
       throw new ApiError("NOT_FOUND", 404, "Cotización inexistente");
     }
-    if (quote.expiresAt.getTime() < Date.now()) {
+    if (existingQuote && existingQuote.expiresAt.getTime() < Date.now()) {
       throw new ApiError("QUOTE_EXPIRED", 409, "La cotización venció", {
-        quote_id: quote.id,
-        expires_at: quote.expiresAt.toISOString(),
+        quote_id: existingQuote.id,
+        expires_at: existingQuote.expiresAt.toISOString(),
       });
     }
 
@@ -64,10 +71,105 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const weightGramsTotal = body.packages.reduce(
+      (total, pkg) => total + pkg.weight_grams,
+      0,
+    );
+    const packagesCount = body.packages.length;
+    let generatedQuoteData: Prisma.ShippingQuoteUncheckedCreateInput | null =
+      null;
+
+    if (existingQuote) {
+      const quotedDestination = existingQuote.toAddressSnapshot as {
+        postal_code?: string;
+      };
+      const mismatch =
+        existingQuote.sellerProfileId !== body.seller_profile_id ||
+        existingQuote.weightGramsTotal !== weightGramsTotal ||
+        existingQuote.packagesCount !== packagesCount ||
+        quotedDestination.postal_code !==
+          body.shipping_address_snapshot.postal_code ||
+        (body.service_level &&
+          existingQuote.serviceLevel !== body.service_level);
+
+      if (mismatch) {
+        throw new ApiError(
+          "QUOTE_MISMATCH",
+          409,
+          "La cotizacion no coincide con los datos del envio",
+          {
+            quote_id: existingQuote.id,
+            seller_profile_id: body.seller_profile_id,
+            postal_code: body.shipping_address_snapshot.postal_code,
+            weight_grams_total: weightGramsTotal,
+            packages_count: packagesCount,
+          },
+        );
+      }
+    } else {
+      const serviceLevel = body.service_level;
+      if (!serviceLevel) {
+        throw new ApiError(
+          "BAD_REQUEST",
+          400,
+          "service_level es obligatorio cuando no se envia shipping_quote_id",
+        );
+      }
+
+      const pickupAddress = await fetchSellerPickupAddress(
+        body.seller_profile_id,
+        requestId,
+      );
+      const matchedRate = await findMatchingRate({
+        pickupPostalCode: pickupAddress.postal_code,
+        shippingPostalCode: body.shipping_address_snapshot.postal_code,
+        weightGramsTotal,
+        serviceLevel,
+      });
+
+      if (!matchedRate) {
+        throw new ApiError(
+          "RATE_NOT_FOUND",
+          422,
+          "No hay tarifa disponible para este envio",
+          {
+            seller_profile_id: body.seller_profile_id,
+            postal_code: pickupAddress.postal_code,
+            weight_grams_total: weightGramsTotal,
+            service_level: serviceLevel,
+          },
+        );
+      }
+
+      generatedQuoteData = {
+        id: generateId("qte"),
+        sellerProfileId: body.seller_profile_id,
+        fromAddressSnapshot: pickupAddress as unknown as object,
+        toAddressSnapshot:
+          body.shipping_address_snapshot as unknown as object,
+        serviceLevel,
+        carrier: matchedRate.carrier,
+        costCents: matchedRate.costCents,
+        weightGramsTotal,
+        packagesCount,
+        packagesSnapshot: body.packages as unknown as object,
+        estimatedDaysMin: matchedRate.estimatedDaysMin,
+        estimatedDaysMax: matchedRate.estimatedDaysMax,
+        expiresAt: new Date(Date.now() + QUOTE_TTL_MS),
+      };
+    }
+
     const shipmentId = generateId("shp");
     const trackingNumber = generateTrackingNumber();
 
     const result = await prisma.$transaction(async (tx) => {
+      const quote = generatedQuoteData
+        ? await tx.shippingQuote.create({ data: generatedQuoteData })
+        : existingQuote;
+      if (!quote) {
+        throw new ApiError("NOT_FOUND", 404, "Cotizacion inexistente");
+      }
+
       // ADR-006: el pedido completo es un ShipmentGroup (1 por order_id), dueño
       // del tracking GLOBAL ("BMK-…") — el único que ve el comprador. El primer
       // shipment de un order_id crea el grupo; los siguientes solo incrementan

@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "db:seed": "tsx prisma/seed.ts",
+    "db:seed-rates": "tsx prisma/seed-rates.ts",
     "db:reset": "prisma migrate reset --force",
     "db:link-operator": "tsx scripts/link-operator.ts",
     "set-admin": "tsx scripts/set-admin.ts",

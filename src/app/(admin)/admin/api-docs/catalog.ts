@@ -177,7 +177,7 @@ export const API_CATALOG: EndpointSpec[] = [
       },
     ],
     requestBody: {
-      shipping_quote_id: "qte_PEGAR_AQUI",
+      service_level: "standard",
       order_id: "ord_01HZX5K8Q2",
       order_seller_group_id: "osg_01HZX5K8Q2",
       sales_order_id: "sor_01HZX5K8Q2",
@@ -221,15 +221,26 @@ export const API_CATALOG: EndpointSpec[] = [
     errors: [
       { code: "QUOTE_EXPIRED", status: 409, when: "La cotización venció (>60 min)." },
       {
+        code: "QUOTE_MISMATCH",
+        status: 409,
+        when: "La quote no coincide con el vendedor, destino, peso o paquetes.",
+      },
+      {
         code: "SHIPMENT_ALREADY_EXISTS",
         status: 409,
         when: "Ya existe un shipment para ese sales_order_id.",
       },
       { code: "NOT_FOUND", status: 404, when: "La quote no existe." },
+      {
+        code: "RATE_NOT_FOUND",
+        status: 422,
+        when: "No hay una tarifa configurada para el origen, destino y peso.",
+      },
       { code: "BAD_REQUEST", status: 400, when: "Body inválido (zod)." },
     ],
     notes: [
-      "Encadená: primero ejecutá POST /shipping-quotes, copiá un `qte_…` de la respuesta y pegalo en shipping_quote_id.",
+      "shipping_quote_id es opcional. Sin quote, enviá service_level y Shipping resuelve origen, tarifa y quote internamente.",
+      "Si enviás shipping_quote_id, service_level es opcional y la quote se valida contra los datos del shipment.",
       "Sprint 1: label_url es un PDF placeholder; tracking_number = 'TRK-AR-' + 8 dígitos.",
     ],
   },

@@ -177,7 +177,7 @@ S2S, lo llama Seller. Soporta `Idempotency-Key`.
 **Request**
 ```json
 {
-  "shipping_quote_id": "qte_01H…",
+  "service_level": "standard",
   "order_id": "ord_01H…",
   "order_seller_group_id": "osg_01H…",
   "sales_order_id": "sor_01H…",
@@ -196,6 +196,10 @@ S2S, lo llama Seller. Soporta `Idempotency-Key`.
   ]
 }
 ```
+
+`shipping_quote_id` es opcional:
+- Si Seller lo envía, Shipping valida que la quote esté vigente y coincida con vendedor, destino, cantidad de paquetes y peso total.
+- Si Seller no lo envía, debe enviar `service_level`. Shipping consulta internamente la dirección de retiro del vendedor, calcula la tarifa y crea una quote interna dentro de la misma operación.
 
 **Response 201**
 ```json
@@ -228,7 +232,11 @@ S2S, lo llama Seller. Soporta `Idempotency-Key`.
 
 **Errores**:
 - `409 QUOTE_EXPIRED`
+- `409 QUOTE_MISMATCH`
 - `409 SHIPMENT_ALREADY_EXISTS` con `details: { existing_shipment_id }`
+- `422 RATE_NOT_FOUND`
+- `422 POSTAL_CODE_UNKNOWN`
+- `422 SELLER_PICKUP_ADDRESS_NOT_FOUND`
 
 > **Sprint 1**: `label_url` apunta a un PDF placeholder estático en `/public/labels/sample.pdf`. `tracking_number` se genera con helper `"TRK-AR-" + random8digits`.
 

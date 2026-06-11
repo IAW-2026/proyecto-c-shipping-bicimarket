@@ -10,7 +10,7 @@
  * preserva los usuarios locales de la app (`logistics_operators`).
  *
  * Contenido del seed:
- *   - 45 shipping_rates (5 distancias × 3 pesos × 3 services).
+ *   - 150 shipping_rates (5 distancias × 10 pesos × 3 services).
  *   - 2 operadores (Shipp Operator 1 en van, Shipp Operator 2 en moto), con los
  *     clerk_user_id de la instancia de Clerk de corrección IAW.
  *   - 16 pedidos con casos de uso que cubren single + multi-vendedor en TODOS
@@ -207,9 +207,16 @@ const RATES = (() => {
     { min: 500, max: 999_999, label: "nacional-largo" },
   ];
   const weights = [
-    { min: 0, max: 2000, mul: 1 },
-    { min: 2001, max: 10000, mul: 1.8 },
-    { min: 10001, max: 50000, mul: 3.5 },
+    { min: 0, max: 500, mul: 0.7 },
+    { min: 501, max: 1000, mul: 0.85 },
+    { min: 1001, max: 2000, mul: 1 },
+    { min: 2001, max: 5000, mul: 1.35 },
+    { min: 5001, max: 10000, mul: 1.8 },
+    { min: 10001, max: 20000, mul: 2.5 },
+    { min: 20001, max: 50000, mul: 3.5 },
+    { min: 50001, max: 100000, mul: 5 },
+    { min: 100001, max: 150000, mul: 7.5 },
+    { min: 150001, max: 200000, mul: 10 },
   ];
   const baseStandard: Record<string, number> = {
     local: 250_000,

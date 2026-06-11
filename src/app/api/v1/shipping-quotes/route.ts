@@ -8,103 +8,16 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { callServiceApi, requireServiceToken } from "@/lib/service-auth";
+import { requireServiceToken } from "@/lib/service-auth";
 import { generateId } from "@/lib/ids";
-import { ApiError, handleApiError } from "@/lib/api-error";
+import { handleApiError } from "@/lib/api-error";
 import { toQuoteResponseDTO } from "@/lib/dto";
 import { createQuoteSchema } from "@/validation/shipping-quotes";
 import { quoteMultiOriginSum } from "@/lib/quote-engine";
-import { adaptPickupAddressApi } from "@/adapters/seller";
 import { logger } from "@/lib/logger";
-import type { SellerPickupAddressApi } from "@/types/external/seller";
+import { fetchSellerPickupAddress } from "@/lib/seller-pickup";
 
 const QUOTE_TTL_MS = 60 * 60 * 1000;
-
-async function fetchPickupAddress(sellerProfileId: string, requestId: string) {
-  logger.info({
-    msg: "shipping-quotes.fetch-pickup.start",
-    requestId,
-    seller_profile_id: sellerProfileId,
-    target: "seller",
-  });
-
-  let res: Response;
-  try {
-    res = await callServiceApi(
-      "seller",
-      `/api/v1/seller-profile/${sellerProfileId}/pickup-address`,
-    );
-  } catch (err) {
-    logger.error({
-      msg: "shipping-quotes.fetch-pickup.exception",
-      requestId,
-      seller_profile_id: sellerProfileId,
-      target: "seller",
-      cause: String(err),
-    });
-    throw new ApiError(
-      "UPSTREAM_ERROR",
-      502,
-      "No pudimos obtener la direccion de retiro del vendedor",
-      {
-        seller_profile_id: sellerProfileId,
-        target: "seller",
-        cause: String(err),
-        infoSellerApi: {
-          endpoint: "/api/v1/seller-profile/{seller_profile_id}/pickup-address",
-          expected_response: "200 OK con { pickup_address: { postal_code, city, province } }",
-          real_response: err instanceof Response ? {
-            status: err.status,
-            body: await err.text().catch(() => "<unavailable>"),
-          } : "<unavailable>",
-        },
-      },
-    );
-  }
-
-  logger.info({
-    msg: "shipping-quotes.fetch-pickup.response",
-    requestId,
-    seller_profile_id: sellerProfileId,
-    target: "seller",
-    upstream_status: res.status,
-    ok: res.ok,
-  });
-
-  if (!res.ok) {
-    const details = await res.text().catch(() => "");
-    logger.warn({
-      msg: "shipping-quotes.fetch-pickup.failed",
-      requestId,
-      seller_profile_id: sellerProfileId,
-      target: "seller",
-      upstream_status: res.status,
-      upstream_body: details,
-    });
-    throw new ApiError(
-      res.status === 404 ? "SELLER_PICKUP_ADDRESS_NOT_FOUND" : "UPSTREAM_ERROR",
-      res.status === 404 ? 422 : 502,
-      "No pudimos resolver la direccion de retiro del vendedor",
-      {
-        seller_profile_id: sellerProfileId,
-        target: "seller",
-        upstream_status: res.status,
-        upstream_body: details,
-      },
-    );
-  }
-
-  const raw = (await res.json()) as SellerPickupAddressApi;
-  logger.info({
-    msg: "shipping-quotes.fetch-pickup.success",
-    requestId,
-    seller_profile_id: sellerProfileId,
-    postal_code: raw.pickup_address.postal_code,
-    city: raw.pickup_address.city,
-    province: raw.pickup_address.province,
-  });
-  return adaptPickupAddressApi(raw);
-}
 
 export async function POST(req: NextRequest) {
   const requestId = req.headers.get("x-request-id") ?? crypto.randomUUID();
@@ -170,7 +83,7 @@ export async function POST(req: NextRequest) {
 
     const pickupAddresses = await Promise.all(
       body.pickups.map((pickup) =>
-        fetchPickupAddress(pickup.seller_profile_id, requestId),
+        fetchSellerPickupAddress(pickup.seller_profile_id, requestId),
       ),
     );
 

@@ -123,7 +123,7 @@ model LogisticsOperator {
 // La distancia se calcula con Haversine entre el lat/lng del CP origen y
 // destino (ver src/lib/geo/distance.ts). El motor de matching está en
 // src/lib/quote-engine.ts.
-// Seed: 45 filas (5 rangos km × 3 rangos peso × 3 service_levels), con
+// Seed: 150 filas (5 rangos km × 10 rangos peso × 3 service_levels), con
 // algunas filas de same_day inactivas para distancias largas.
 
 model ShippingRate {

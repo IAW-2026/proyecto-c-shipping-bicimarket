@@ -81,7 +81,8 @@ export interface OrderPickupSummary {
 
 /** Body de POST /api/v1/shipments (S2S Seller, docs/03 §SH2 create). */
 export interface CreateShipmentBody {
-  shipping_quote_id: string;
+  shipping_quote_id?: string;
+  service_level?: ServiceLevel;
   order_id: string;
   order_seller_group_id: string;
   sales_order_id: string;
