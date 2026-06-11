@@ -177,20 +177,12 @@ export const API_CATALOG: EndpointSpec[] = [
       },
     ],
     requestBody: {
-      service_level: "standard",
+      shipping_quote_id: "qte_PEGAR_AQUI",
       order_id: "ord_01HZX5K8Q2",
       order_seller_group_id: "osg_01HZX5K8Q2",
       sales_order_id: "sor_01HZX5K8Q2",
       seller_profile_id: "slp_01HZX5K8Q2",
       buyer_profile_id: "byp_01HZX5K8Q2",
-      shipping_address_snapshot: {
-        street: "Av. Corrientes",
-        number: "1234",
-        city: "CABA",
-        province: "Buenos Aires",
-        postal_code: "C1043",
-        country: "AR",
-      },
       packages: [
         {
           weight_grams: 14500,
@@ -223,7 +215,7 @@ export const API_CATALOG: EndpointSpec[] = [
       {
         code: "QUOTE_MISMATCH",
         status: 409,
-        when: "La quote no coincide con el vendedor, destino, peso o paquetes.",
+        when: "La quote no coincide con el vendedor, peso o paquetes.",
       },
       {
         code: "SHIPMENT_ALREADY_EXISTS",
@@ -231,16 +223,11 @@ export const API_CATALOG: EndpointSpec[] = [
         when: "Ya existe un shipment para ese sales_order_id.",
       },
       { code: "NOT_FOUND", status: 404, when: "La quote no existe." },
-      {
-        code: "RATE_NOT_FOUND",
-        status: 422,
-        when: "No hay una tarifa configurada para el origen, destino y peso.",
-      },
       { code: "BAD_REQUEST", status: 400, when: "Body inválido (zod)." },
     ],
     notes: [
-      "shipping_quote_id es opcional. Sin quote, enviá service_level y Shipping resuelve origen, tarifa y quote internamente.",
-      "Si enviás shipping_quote_id, service_level es opcional y la quote se valida contra los datos del shipment.",
+      "shipping_quote_id es obligatorio. Shipping toma origen, destino, carrier, service_level y costo desde la quote.",
+      "Seller solo envía los identificadores de la orden y los paquetes físicos.",
       "Sprint 1: label_url es un PDF placeholder; tracking_number = 'TRK-AR-' + 8 dígitos.",
     ],
   },

@@ -177,17 +177,12 @@ S2S, lo llama Seller. Soporta `Idempotency-Key`.
 **Request**
 ```json
 {
-  "service_level": "standard",
+  "shipping_quote_id": "qte_01H…",
   "order_id": "ord_01H…",
   "order_seller_group_id": "osg_01H…",
   "sales_order_id": "sor_01H…",
   "seller_profile_id": "slp_01H…",
   "buyer_profile_id": "byp_01H…",
-  "shipping_address_snapshot": {
-    "street": "Av. Corrientes", "number": "1234",
-    "city": "CABA", "province": "Buenos Aires",
-    "postal_code": "C1043", "country": "AR"
-  },
   "packages": [
     {
       "weight_grams": 14500, "length_cm": 180, "width_cm": 60, "height_cm": 110,
@@ -197,9 +192,7 @@ S2S, lo llama Seller. Soporta `Idempotency-Key`.
 }
 ```
 
-`shipping_quote_id` es opcional:
-- Si Seller lo envía, Shipping valida que la quote esté vigente y coincida con vendedor, destino, cantidad de paquetes y peso total.
-- Si Seller no lo envía, debe enviar `service_level`. Shipping consulta internamente la dirección de retiro del vendedor, calcula la tarifa y crea una quote interna dentro de la misma operación.
+`shipping_quote_id` es obligatorio. Shipping toma de la quote la dirección de retiro, la dirección de entrega, el transportista, el nivel de servicio y el costo. Seller no debe reenviar esos datos. La quote debe estar vigente y coincidir con vendedor, cantidad de paquetes y peso total.
 
 **Response 201**
 ```json
@@ -234,9 +227,6 @@ S2S, lo llama Seller. Soporta `Idempotency-Key`.
 - `409 QUOTE_EXPIRED`
 - `409 QUOTE_MISMATCH`
 - `409 SHIPMENT_ALREADY_EXISTS` con `details: { existing_shipment_id }`
-- `422 RATE_NOT_FOUND`
-- `422 POSTAL_CODE_UNKNOWN`
-- `422 SELLER_PICKUP_ADDRESS_NOT_FOUND`
 
 > **Sprint 1**: `label_url` apunta a un PDF placeholder estático en `/public/labels/sample.pdf`. `tracking_number` se genera con helper `"TRK-AR-" + random8digits`.
 

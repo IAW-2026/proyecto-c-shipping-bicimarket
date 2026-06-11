@@ -17,37 +17,17 @@ const dimensionsSchema = z.object({
 
 // ─── POST /api/v1/shipments (S2S Seller) ───────────────────────────────────
 
-export const createShipmentSchema = z
-  .object({
-    shipping_quote_id: z.string().min(1).optional(),
-    service_level: z.enum(["standard", "express", "same_day"]).optional(),
-    order_id: z.string().min(1),
-    order_seller_group_id: z.string().min(1),
-    sales_order_id: z.string().min(1),
-    seller_profile_id: z.string().min(1),
-    buyer_profile_id: z.string().min(1),
-    shipping_address_snapshot: z.object({
-      street: z.string().min(1),
-      number: z.string().min(1),
-      apartment: z.string().optional(),
-      city: z.string().min(1),
-      province: z.string().min(1),
-      postal_code: z.string().min(1),
-      country: z.string().min(2).max(2),
-    }),
-    packages: z
-      .array(dimensionsSchema.extend({ description: z.string().optional() }))
-      .min(1),
-  })
-  .superRefine((data, ctx) => {
-    if (!data.shipping_quote_id && !data.service_level) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["service_level"],
-        message: "service_level es obligatorio cuando no se envia shipping_quote_id",
-      });
-    }
-  });
+export const createShipmentSchema = z.object({
+  shipping_quote_id: z.string().min(1),
+  order_id: z.string().min(1),
+  order_seller_group_id: z.string().min(1),
+  sales_order_id: z.string().min(1),
+  seller_profile_id: z.string().min(1),
+  buyer_profile_id: z.string().min(1),
+  packages: z
+    .array(dimensionsSchema.extend({ description: z.string().optional() }))
+    .min(1),
+});
 
 // ─── PATCH /api/v1/shipments/{id}/status ───────────────────────────────────
 
