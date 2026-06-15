@@ -18,6 +18,10 @@ interface ShipmentNotificationContext {
   occurredAt: string;
 }
 
+interface ShipmentNotificationOptions {
+  notifySeller?: boolean;
+}
+
 function mapBuyerGroupStatus(
   status: NotifiableShipmentStatus,
 ): BuyerOrderShippingPatchBody["status"] {
@@ -73,6 +77,7 @@ function logRejectedOutbound(
  */
 export async function notifyShipmentStatus(
   context: ShipmentNotificationContext,
+  options: ShipmentNotificationOptions = {},
 ): Promise<void> {
   const buyerPath =
     `/api/v1/orders/${context.orderId}` +
@@ -86,6 +91,7 @@ export async function notifyShipmentStatus(
     shipment_id: context.shipmentId,
     tracking_number: context.orderTrackingNumber,
     ...(context.trackingUrl ? { tracking_url: context.trackingUrl } : {}),
+    occurred_at: context.occurredAt,
   };
   const sellerBody: SellerSalesOrderShippingStatusPatchBody = {
     shipping_status: context.shipmentStatus,
@@ -93,16 +99,20 @@ export async function notifyShipmentStatus(
     occurred_at: context.occurredAt,
   };
 
-  const [buyerResult, sellerResult] = await Promise.allSettled([
+  const calls = [
     callServiceApi("buyer", buyerPath, {
       method: "PATCH",
       body: buyerBody,
     }),
-    callServiceApi("seller", sellerPath, {
+  ];
+  if (options.notifySeller !== false) {
+    calls.push(callServiceApi("seller", sellerPath, {
       method: "PATCH",
       body: sellerBody,
-    }),
-  ]);
+    }));
+  }
+
+  const [buyerResult, sellerResult] = await Promise.allSettled(calls);
 
   logRejectedOutbound(
     "buyer",
@@ -112,6 +122,8 @@ export async function notifyShipmentStatus(
     context.shipmentId,
     buyerResult,
   );
+  if (!sellerResult) return;
+
   logRejectedOutbound(
     "seller",
     "PATCH",

@@ -15,6 +15,7 @@ import { toShipmentDTO } from "@/lib/dto";
 import { createShipmentSchema } from "@/validation/shipments";
 import { ShipmentStatus, TrackingEventType, StatusHistorySource } from "@/generated/prisma/client";
 import type { Prisma } from "@/generated/prisma/client";
+import { notifyShipmentStatus } from "@/lib/shipment-outbound";
 
 // ── POST ───────────────────────────────────────────────────────────────────
 
@@ -181,6 +182,16 @@ export async function POST(req: NextRequest) {
 
       return { shipment, packagesCreated, group };
     });
+
+    await notifyShipmentStatus({
+      shipmentId: result.shipment.id,
+      shipmentStatus: ShipmentStatus.ready_for_pickup,
+      orderId: result.shipment.orderId,
+      orderSellerGroupId: result.shipment.orderSellerGroupId,
+      salesOrderId: result.shipment.salesOrderId,
+      orderTrackingNumber: result.group.trackingNumber,
+      occurredAt: result.shipment.createdAt.toISOString(),
+    }, { notifySeller: false });
 
     return NextResponse.json(
       toShipmentDTO(

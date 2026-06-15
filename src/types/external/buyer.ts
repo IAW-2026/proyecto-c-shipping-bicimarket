@@ -15,4 +15,5 @@ export interface BuyerOrderShippingPatchBody {
   shipment_id: string;
   tracking_number: string;
   tracking_url?: string;
+  occurred_at: string;
 }
