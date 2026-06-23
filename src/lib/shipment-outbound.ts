@@ -37,7 +37,7 @@ function mapBuyerGroupStatus(
   }
 }
 
-function logRejectedOutbound(
+function logOutboundResult(
   target: "buyer" | "seller",
   method: "PATCH",
   path: string,
@@ -66,7 +66,18 @@ function logRejectedOutbound(
       shipmentId,
       upstreamStatus: result.value.status,
     });
+    return;
   }
+
+  logger.info({
+    msg: "shipment-status-patch-succeeded",
+    target,
+    method,
+    path,
+    shipmentId,
+    shippingStatus: (payload as { shipping_status?: string }).shipping_status,
+    upstreamStatus: result.value.status,
+  });
 }
 
 /**
@@ -99,6 +110,19 @@ export async function notifyShipmentStatus(
     occurred_at: context.occurredAt,
   };
 
+  // Confirma el PATCH exacto que se enviara a Buyer para persistir el
+  // shipment individual y el tracking global BMK del pedido.
+  logger.info({
+    msg: "shipment-status-patch-prepared",
+    target: "buyer",
+    method: "PATCH",
+    path: buyerPath,
+    shipmentId: context.shipmentId,
+    orderId: context.orderId,
+    orderSellerGroupId: context.orderSellerGroupId,
+    payload: buyerBody,
+  });
+
   const calls = [
     callServiceApi("buyer", buyerPath, {
       method: "PATCH",
@@ -106,6 +130,15 @@ export async function notifyShipmentStatus(
     }),
   ];
   if (options.notifySeller !== false) {
+    logger.info({
+      msg: "shipment-status-patch-prepared",
+      target: "seller",
+      method: "PATCH",
+      path: sellerPath,
+      shipmentId: context.shipmentId,
+      salesOrderId: context.salesOrderId,
+      payload: sellerBody,
+    });
     calls.push(callServiceApi("seller", sellerPath, {
       method: "PATCH",
       body: sellerBody,
@@ -114,7 +147,7 @@ export async function notifyShipmentStatus(
 
   const [buyerResult, sellerResult] = await Promise.allSettled(calls);
 
-  logRejectedOutbound(
+  logOutboundResult(
     "buyer",
     "PATCH",
     buyerPath,
@@ -124,7 +157,7 @@ export async function notifyShipmentStatus(
   );
   if (!sellerResult) return;
 
-  logRejectedOutbound(
+  logOutboundResult(
     "seller",
     "PATCH",
     sellerPath,

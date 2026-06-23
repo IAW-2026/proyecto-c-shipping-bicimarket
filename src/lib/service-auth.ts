@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { logger } from "@/lib/logger";
 
 const SHIPPING_INBOUND_TOKENS = [
   "BUYER_TO_SHIPPING_SERVICE_TOKEN",
@@ -11,14 +12,12 @@ const SHIPPING_OUTBOUND_TOKEN_BY_APP = {
   payments: "SHIPPING_TO_PAYMENTS_SERVICE_TOKEN",
 } as const;
 
-// Valida que la llamada entrante sea de otra app del marketplace.
-// Convención del proyecto: header X-Service-Token con el secret del par
-// origen→destino. Shipping acepta llamados entrantes desde Buyer y Seller.
+// Valida llamadas entrantes desde otras apps mediante X-Service-Token.
 export function requireServiceToken(req: NextRequest) {
   const received = req.headers.get("x-service-token");
-  const expectedTokens = SHIPPING_INBOUND_TOKENS.map((envName) => process.env[envName]).filter(
-    (value): value is string => Boolean(value),
-  );
+  const expectedTokens = SHIPPING_INBOUND_TOKENS.map(
+    (envName) => process.env[envName],
+  ).filter((value): value is string => Boolean(value));
 
   if (expectedTokens.length === 0) {
     return NextResponse.json(
@@ -29,18 +28,23 @@ export function requireServiceToken(req: NextRequest) {
             "No hay tokens entrantes configurados; revisar BUYER_TO_SHIPPING_SERVICE_TOKEN y SELLER_TO_SHIPPING_SERVICE_TOKEN",
         },
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 
   if (!received || !expectedTokens.includes(received)) {
     return NextResponse.json(
-      { error: { code: "UNAUTHORIZED", message: "X-Service-Token inválido o ausente" } },
-      { status: 401 }
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "X-Service-Token invalido o ausente",
+        },
+      },
+      { status: 401 },
     );
   }
 
-  return null; // OK
+  return null;
 }
 
 type ServiceFetchOptions = {
@@ -50,13 +54,11 @@ type ServiceFetchOptions = {
   timeoutMs?: number;
 };
 
-// Wrapper para llamar a otra app del marketplace.
-// Lee la URL base y el token del par desde las env vars (ver .env.example).
-// Reintenta hasta 3 veces con backoff lineal en errores 5xx o de red.
+// Llama a otra app y reintenta errores 5xx o de red hasta tres veces.
 export async function callServiceApi(
   app: "buyer" | "seller" | "shipping" | "payments",
   path: string,
-  opts: ServiceFetchOptions = {}
+  opts: ServiceFetchOptions = {},
 ) {
   const baseUrl = process.env[`${app.toUpperCase()}_API_URL`];
   const tokenEnvName =
@@ -69,38 +71,90 @@ export async function callServiceApi(
     );
   }
 
+  const requestId = crypto.randomUUID();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     "X-Service-Token": token,
-    "X-Request-Id": crypto.randomUUID(),
+    "X-Request-Id": requestId,
   };
   if (opts.idempotencyKey) headers["Idempotency-Key"] = opts.idempotencyKey;
 
   const url = `${baseUrl}${path}`;
   const delays = [1000, 3000, 9000];
   const timeoutMs = opts.timeoutMs ?? 15_000;
+  const method = opts.method ?? "GET";
   let lastError: unknown;
 
   for (let attempt = 0; attempt < 3; attempt++) {
+    const attemptNumber = attempt + 1;
+    const startedAt = Date.now();
+
+    // Correlaciona el PATCH saliente con los logs de Buyer/Seller. El token
+    // nunca se incluye en esta salida.
+    logger.info({
+      msg: "service-outbound-request",
+      target: app,
+      method,
+      path,
+      requestId,
+      attempt: attemptNumber,
+      timeoutMs,
+      payload: opts.body,
+    });
+
     try {
       const res = await fetch(url, {
-        method: opts.method ?? "GET",
+        method,
         headers,
         body: opts.body ? JSON.stringify(opts.body) : undefined,
         signal: AbortSignal.timeout(timeoutMs),
       });
 
+      logger.info({
+        msg: "service-outbound-response",
+        target: app,
+        method,
+        path,
+        requestId,
+        attempt: attemptNumber,
+        status: res.status,
+        ok: res.ok,
+        durationMs: Date.now() - startedAt,
+      });
+
       if (res.status >= 500) {
-        lastError = new Error(`${app} respondió ${res.status}`);
+        lastError = new Error(`${app} respondio ${res.status}`);
       } else {
         return res;
       }
     } catch (err) {
       lastError = err;
+      logger.warn({
+        msg: "service-outbound-network-error",
+        target: app,
+        method,
+        path,
+        requestId,
+        attempt: attemptNumber,
+        durationMs: Date.now() - startedAt,
+        cause: err instanceof Error ? err.message : String(err),
+      });
     }
 
-    if (attempt < 2) await new Promise((r) => setTimeout(r, delays[attempt]));
+    if (attempt < 2) {
+      logger.warn({
+        msg: "service-outbound-retry-scheduled",
+        target: app,
+        method,
+        path,
+        requestId,
+        attempt: attemptNumber,
+        nextAttempt: attemptNumber + 1,
+        delayMs: delays[attempt],
+      });
+      await new Promise((resolve) => setTimeout(resolve, delays[attempt]));
+    }
   }
 
-  throw lastError ?? new Error(`Falló la llamada a ${app} ${path}`);
+  throw lastError ?? new Error(`Fallo la llamada a ${app} ${path}`);
 }

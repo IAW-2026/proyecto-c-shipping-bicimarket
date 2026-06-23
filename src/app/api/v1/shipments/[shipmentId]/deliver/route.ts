@@ -170,6 +170,16 @@ export async function POST(
     });
 
     const paymentsPath = "/api/v1/internal/shipment-delivered";
+    logger.info({
+      msg: "shipment-delivered-post-prepared",
+      target: "payments",
+      method: "POST",
+      path: paymentsPath,
+      shipmentId: shipment.id,
+      orderId: shipment.orderId,
+      payload: paymentsBody,
+    });
+
     const [paymentsResult] = await Promise.allSettled([
       callServiceApi("payments", paymentsPath, {
         method: "POST",
@@ -192,6 +202,15 @@ export async function POST(
         method: "POST",
         path: paymentsPath,
         payload: paymentsBody,
+        shipmentId: shipment.id,
+        upstreamStatus: paymentsResult.value.status,
+      });
+    } else {
+      logger.info({
+        msg: "shipment-delivered-post-succeeded",
+        target: "payments",
+        method: "POST",
+        path: paymentsPath,
         shipmentId: shipment.id,
         upstreamStatus: paymentsResult.value.status,
       });
