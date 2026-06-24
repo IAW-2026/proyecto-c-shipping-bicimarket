@@ -15,6 +15,17 @@ const dimensionsSchema = z.object({
   height_cm: z.number().int().positive(),
 });
 
+const shipmentStatusSchema = z.enum([
+  "created",
+  "ready_for_pickup",
+  "picked_up",
+  "in_transit",
+  "out_for_delivery",
+  "delivered",
+  "failed_delivery",
+  "returned",
+]);
+
 // ─── POST /api/v1/shipments (S2S Seller) ───────────────────────────────────
 
 export const createShipmentSchema = z.object({
@@ -29,19 +40,32 @@ export const createShipmentSchema = z.object({
     .min(1),
 });
 
+// ─── GET /api/v1/shipments (S2S Analytics) ─────────────────────────────────
+
+const analyticsDateRangeSchema = z
+  .object({
+    from: z.string().datetime({ offset: true }).optional(),
+    to: z.string().datetime({ offset: true }).optional(),
+  })
+  .refine(
+    ({ from, to }) => !from || !to || new Date(from) <= new Date(to),
+    { message: "from debe ser anterior o igual a to", path: ["to"] },
+  );
+
+export const shipmentAnalyticsListQuerySchema = analyticsDateRangeSchema.and(
+  z.object({
+    status: shipmentStatusSchema.optional(),
+    page: z.coerce.number().int().positive().default(1),
+    limit: z.coerce.number().int().min(1).max(100).default(20),
+  }),
+);
+
+export const shipmentMetricsQuerySchema = analyticsDateRangeSchema;
+
 // ─── PATCH /api/v1/shipments/{id}/status ───────────────────────────────────
 
 export const patchShipmentStatusSchema = z.object({
-  status: z.enum([
-    "created",
-    "ready_for_pickup",
-    "picked_up",
-    "in_transit",
-    "out_for_delivery",
-    "delivered",
-    "failed_delivery",
-    "returned",
-  ]),
+  status: shipmentStatusSchema,
   note: z.string().optional(),
 });
 

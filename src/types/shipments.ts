@@ -115,3 +115,22 @@ export interface ShipmentsAdminFilters {
   created_at_from?: string;
   created_at_to?: string;
 }
+
+export interface ShipmentMetricsDTO {
+  total: number;
+  delivered_count: number;
+  in_transit_count: number;
+  failed_count: number;
+  fulfillment_rate: number;
+  avg_delivery_time_days: number;
+  backlog_by_status: Array<{
+    status: Extract<
+      ShipmentStatus,
+      | "ready_for_pickup"
+      | "picked_up"
+      | "in_transit"
+      | "out_for_delivery"
+    >;
+    count: number;
+  }>;
+}

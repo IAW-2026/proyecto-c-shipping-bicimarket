@@ -6,6 +6,14 @@ const SHIPPING_INBOUND_TOKENS = [
   "SELLER_TO_SHIPPING_SERVICE_TOKEN",
 ] as const;
 
+export type InboundServiceCaller = "buyer" | "seller" | "dashboard";
+
+const SHIPPING_INBOUND_TOKEN_BY_CALLER = {
+  buyer: "BUYER_TO_SHIPPING_SERVICE_TOKEN",
+  seller: "SELLER_TO_SHIPPING_SERVICE_TOKEN",
+  dashboard: "DASHBOARD_TO_SHIPPING_SERVICE_TOKEN",
+} as const satisfies Record<InboundServiceCaller, string>;
+
 const SHIPPING_OUTBOUND_TOKEN_BY_APP = {
   buyer: "SHIPPING_TO_BUYER_SERVICE_TOKEN",
   seller: "SHIPPING_TO_SELLER_SERVICE_TOKEN",
@@ -33,6 +41,58 @@ export function requireServiceToken(req: NextRequest) {
   }
 
   if (!received || !expectedTokens.includes(received)) {
+    return NextResponse.json(
+      {
+        error: {
+          code: "UNAUTHORIZED",
+          message: "X-Service-Token invalido o ausente",
+        },
+      },
+      { status: 401 },
+    );
+  }
+
+  return null;
+}
+
+/**
+ * Identifica el servicio que firma un request sin otorgarle permisos por si
+ * solo. Cada route handler decide que callers acepta. Esto evita que el token
+ * read-only de Analytics quede habilitado en los endpoints de escritura que
+ * usan requireServiceToken().
+ */
+export function getInboundServiceCaller(
+  req: NextRequest,
+): InboundServiceCaller | null {
+  const received = req.headers.get("x-service-token");
+  if (!received) return null;
+
+  for (const [caller, envName] of Object.entries(
+    SHIPPING_INBOUND_TOKEN_BY_CALLER,
+  ) as Array<[InboundServiceCaller, string]>) {
+    const expected = process.env[envName];
+    if (expected && received === expected) return caller;
+  }
+
+  return null;
+}
+
+export function requireDashboardServiceToken(req: NextRequest) {
+  const expected = process.env.DASHBOARD_TO_SHIPPING_SERVICE_TOKEN;
+  if (!expected) {
+    return NextResponse.json(
+      {
+        error: {
+          code: "SERVER_MISCONFIGURED",
+          message:
+            "DASHBOARD_TO_SHIPPING_SERVICE_TOKEN no esta configurado",
+        },
+      },
+      { status: 500 },
+    );
+  }
+
+  if (getInboundServiceCaller(req) !== "dashboard") {
     return NextResponse.json(
       {
         error: {

@@ -6,13 +6,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
-import { requireServiceToken } from "@/lib/service-auth";
+import {
+  getInboundServiceCaller,
+  requireServiceToken,
+} from "@/lib/service-auth";
 import { requireAdmin } from "@/lib/auth-helpers";
 import { generateId, generateTrackingNumber, generateGroupTrackingNumber } from "@/lib/ids";
 import { ApiError, handleApiError } from "@/lib/api-error";
 import { paginate } from "@/lib/pagination";
 import { toShipmentDTO } from "@/lib/dto";
-import { createShipmentSchema } from "@/validation/shipments";
+import {
+  createShipmentSchema,
+  shipmentAnalyticsListQuerySchema,
+} from "@/validation/shipments";
 import { ShipmentStatus, TrackingEventType, StatusHistorySource } from "@/generated/prisma/client";
 import type { Prisma } from "@/generated/prisma/client";
 import { notifyShipmentStatus } from "@/lib/shipment-outbound";
@@ -213,6 +219,62 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const orderId = searchParams.get("orderId");
+
+    // Modo S2S Analytics: listado global read-only. El token del Dashboard no
+    // se agrega a requireServiceToken(), por lo que no obtiene acceso a POST.
+    if (getInboundServiceCaller(req) === "dashboard") {
+      const parsed = shipmentAnalyticsListQuerySchema.safeParse({
+        from: searchParams.get("from") ?? undefined,
+        to: searchParams.get("to") ?? undefined,
+        status: searchParams.get("status") ?? undefined,
+        page: searchParams.get("page") ?? undefined,
+        limit: searchParams.get("limit") ?? undefined,
+      });
+      if (!parsed.success) {
+        throw new ApiError("BAD_REQUEST", 400, "Query params invalidos", {
+          issues: parsed.error.issues,
+        });
+      }
+
+      const { from, to, status, page, limit } = parsed.data;
+      const where: Prisma.ShipmentWhereInput = {
+        ...(status && { status }),
+        ...((from || to) && {
+          createdAt: {
+            ...(from && { gte: new Date(from) }),
+            ...(to && { lte: new Date(to) }),
+          },
+        }),
+      };
+      const result = await paginate(
+        prisma.shipment,
+        {
+          where,
+          orderBy: { createdAt: "desc" },
+          include: {
+            packages: true,
+            group: { select: { trackingNumber: true } },
+          },
+        },
+        { page, limit },
+      );
+
+      return NextResponse.json({
+        data: result.data.map((shipment) => {
+          const typed = shipment as {
+            packages: never[];
+            group: { trackingNumber: string };
+          };
+          return toShipmentDTO(
+            shipment as never,
+            typed.packages,
+            undefined,
+            typed.group.trackingNumber,
+          );
+        }),
+        pagination: result.pagination,
+      });
+    }
 
     // Modo S2S Buyer: requiere ?orderId
     const s2sDenied = requireServiceToken(req);

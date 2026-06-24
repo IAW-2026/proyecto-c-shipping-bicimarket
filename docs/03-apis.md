@@ -252,6 +252,47 @@ Auth: S2S (típicamente Buyer App). **Response 200**: lista paginada de shipment
 }
 ```
 
+El mismo endpoint acepta consultas globales desde Analytics con
+`X-Service-Token: DASHBOARD_TO_SHIPPING_SERVICE_TOKEN`:
+
+`GET /api/v1/shipments?from=<ISO>&to=<ISO>&status=<status>&page=1&limit=20`
+
+- `from` y `to` son opcionales, inclusivos y filtran por `created_at`.
+- `status` es opcional y acepta cualquier estado de `ShipmentStatus`.
+- La paginación usa el formato canónico de §0.4 y limita `limit` a 100.
+- El token de Analytics es de solo lectura y no autoriza los POST de Shipping.
+
+### `GET /api/v1/shipments/metrics`
+Agregado operativo consumido por el Manager Analytics Dashboard.
+
+**Auth**: `X-Service-Token` con `DASHBOARD_TO_SHIPPING_SERVICE_TOKEN`.
+
+**Query params**: `from` y `to` opcionales, ISO 8601, inclusivos sobre
+`shipment.created_at`.
+
+**Response 200**
+```json
+{
+  "total": 120,
+  "delivered_count": 82,
+  "in_transit_count": 25,
+  "failed_count": 4,
+  "fulfillment_rate": 68.33333333333333,
+  "avg_delivery_time_days": 3.6,
+  "backlog_by_status": [
+    { "status": "ready_for_pickup", "count": 7 },
+    { "status": "picked_up", "count": 3 },
+    { "status": "in_transit", "count": 10 },
+    { "status": "out_for_delivery", "count": 5 }
+  ]
+}
+```
+
+`in_transit_count` y `backlog_by_status` consideran los cuatro estados activos
+mostrados arriba. Los conteos representan el estado actual de los shipments
+creados en el período. `avg_delivery_time_days` promedia `created_at` hasta
+`delivered_at`, redondeado a un decimal. Las métricas sin datos devuelven cero.
+
 ### `PATCH /api/v1/shipments/{shipmentId}/status`
 Para correcciones admin. **Auth**: rol `admin` o `logistics`.
 
