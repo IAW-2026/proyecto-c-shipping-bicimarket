@@ -27,6 +27,7 @@ export const AR_POSTAL_CODES: Record<string, PostalCodeEntry> = {
   C1007: { cp: "C1007", lat: -34.6020, lng: -58.3729, city: "San Nicolás", province: "Buenos Aires" },
   C1010: { cp: "C1010", lat: -34.6035, lng: -58.3825, city: "San Nicolás", province: "Buenos Aires" },
   C1032: { cp: "C1032", lat: -34.5894, lng: -58.3954, city: "Recoleta", province: "Buenos Aires" },
+  C1042: { cp: "C1042", lat: -34.6048, lng: -58.3890, city: "San Nicolás", province: "Buenos Aires" },
   C1043: { cp: "C1043", lat: -34.6037, lng: -58.4044, city: "Almagro", province: "Buenos Aires" },
   C1063: { cp: "C1063", lat: -34.6260, lng: -58.3814, city: "Monserrat", province: "Buenos Aires" },
   C1073: { cp: "C1073", lat: -34.6151, lng: -58.3838, city: "San Telmo", province: "Buenos Aires" },
@@ -163,6 +164,7 @@ export const AR_POSTAL_CODES: Record<string, PostalCodeEntry> = {
   B6500: { cp: "B6500", lat: -34.6090, lng: -63.7440, city: "Trenque Lauquen", province: "Buenos Aires" },
   B6700: { cp: "B6700", lat: -34.9230, lng: -59.0030, city: "Luján", province: "Buenos Aires" },
   B6740: { cp: "B6740", lat: -34.4990, lng: -59.0090, city: "Chivilcoy", province: "Buenos Aires" },
+  B2800: { cp: "B2800", lat: -34.0958, lng: -59.0242, city: "Zárate", province: "Buenos Aires" },
   B2900: { cp: "B2900", lat: -33.7440, lng: -59.2580, city: "San Nicolás", province: "Buenos Aires" },
   B2930: { cp: "B2930", lat: -33.3370, lng: -60.2120, city: "San Pedro", province: "Buenos Aires" },
 

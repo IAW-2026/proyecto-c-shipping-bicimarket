@@ -7,15 +7,14 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
-    "db:seed": "tsx prisma/seed.ts",
+    "db:seed": "prisma db seed",
     "db:seed-rates": "tsx prisma/seed-rates.ts",
     "db:reset": "prisma migrate reset --force",
+    "db:verify-seed": "tsx scripts/verify-seed-postal-rates.ts",
+    "test:postal-codes": "tsx --test src/lib/geo/ar-postal-codes.test.ts",
     "db:link-operator": "tsx scripts/link-operator.ts",
     "set-admin": "tsx scripts/set-admin.ts",
     "clear-storage": "tsx scripts/clear-storage.ts"
-  },
-  "prisma": {
-    "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.0",

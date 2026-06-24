@@ -4,8 +4,6 @@ import {
   ServiceLevel,
 } from "../src/generated/prisma/client";
 
-const prisma = new PrismaClient();
-
 const distanceBands = [
   { min: 0, max: 10, baseCostCents: 250_000 },
   { min: 11, max: 50, baseCostCents: 350_000 },
@@ -80,7 +78,7 @@ const rates = weightBands.flatMap((weight) =>
   ),
 );
 
-async function main() {
+export async function seedRates(prisma: PrismaClient): Promise<void> {
   await prisma.$transaction(
     rates.map((rate) =>
       prisma.shippingRate.upsert({
@@ -96,11 +94,14 @@ async function main() {
   );
 }
 
-main()
-  .catch((error) => {
-    console.error(error);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+if (process.argv[1]?.replace(/\\/g, "/").endsWith("prisma/seed-rates.ts")) {
+  const prisma = new PrismaClient();
+  seedRates(prisma)
+    .catch((error) => {
+      console.error(error);
+      process.exitCode = 1;
+    })
+    .finally(async () => {
+      await prisma.$disconnect();
+    });
+}

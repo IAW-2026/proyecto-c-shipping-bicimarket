@@ -73,10 +73,10 @@ La lógica propia de Shipping (envíos, asignaciones, tracking, tarifas) funcion
   tiene `publicMetadata.admin = true` en Clerk. El admin de prueba ya viene marcado; si por
   algún motivo no lo estuviera, se setea con `npm run set-admin` (usa la `CLERK_SECRET_KEY`
   del `.env`) o a mano en el Clerk Dashboard del usuario admin.
-- **Datos precargados**: el seed (`prisma/seed.ts`) carga 45 tarifas, 2 operadores y 16
-  pedidos que cubren todos los estados de la máquina, en variantes single-vendedor y
-  multi-vendedor, repartidos entre los dos operadores, más varios pedidos libres para probar
-  el flujo de toma. Se corre con `npm run db:seed`.
+- **Datos precargados**: el seed (`prisma/seed.ts`) carga la tarifaria canónica de 150 filas,
+  8 operadores ficticios y dos datasets coordinados con Buyer/Seller/Payments: 60 pedidos,
+  76 envíos y cobertura completa de la máquina de estados. `npm run db:seed` limpia y
+  reconstruye los datos; `npm run db:reset` recrea primero el esquema desde migraciones.
 - **Decisiones de diseño**:
   - `ShipmentGroup` agrupa los N envíos de un pedido y es dueño del tracking global
     (`BMK-…`) y del estado consolidado; la asignación del operador vive a nivel grupo.
