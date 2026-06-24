@@ -1,0 +1,388 @@
+// Shipping App — schema completo (sprint 1 / app standalone, ADR-002)
+//
+// Doc de referencia: docs/04-modelo-de-datos.md §3 (modelo de Shipping)
+// Convenciones generales: docs/04 §0 (IDs con prefijo, snapshots inmutables,
+// refs opacas a otras apps, soft delete, auditoría de cambios de estado).
+//
+// IDs con prefijo (generados en aplicación con lib/ids.ts, T03):
+//   lop_  logistics_operators
+//   rat_  shipping_rates
+//   qte_  shipping_quotes
+//   shp_  shipments
+//   pkg_  packages
+//   evt_  tracking_events
+//   dla_  delivery_assignments
+//   prf_  delivery_proofs
+//   ssh_  shipment_status_history
+//   grp_  shipment_groups (ADR-006: el pedido completo, dueño del tracking global)
+//
+// Refs opacas a otras apps (string, sin FK): ord_, osg_, sor_, slp_, byp_, pay_
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─── Enums ─────────────────────────────────────────────────────────────────
+
+enum VehicleType {
+  motorcycle
+  car
+  van
+  truck
+}
+
+enum OperatorStatus {
+  active
+  inactive
+  suspended
+}
+
+enum ServiceLevel {
+  standard
+  express
+  same_day
+}
+
+enum ShipmentStatus {
+  created
+  ready_for_pickup
+  picked_up
+  in_transit
+  out_for_delivery
+  delivered
+  failed_delivery
+  returned
+}
+
+enum TrackingEventType {
+  created
+  ready_for_pickup
+  picked_up
+  in_transit
+  out_for_delivery
+  delivered
+  failed_delivery
+  returned
+}
+
+enum AssignmentStatus {
+  assigned
+  accepted
+  picked_up
+  delivered
+  reassigned
+  cancelled
+}
+
+enum StatusHistorySource {
+  logistics
+  admin
+  system
+}
+
+// ─── 1. LogisticsOperator ──────────────────────────────────────────────────
+// Doble rol:
+//   (a) Snapshot del usuario de Clerk-Shipping para el operador logueado
+//       (fullName/email se sincronizan desde el JWT en cada request — patrón
+//       de provisioning perezoso, sin webhook de Clerk).
+//   (b) Entidad de dominio con datos del vehículo y status.
+// No se auto-aprovisiona: lo crea un admin con POST /api/v1/logistics-operators.
+// Ver docs/05-usuarios.md §3.
+
+model LogisticsOperator {
+  id           String         @id // lop_…
+  clerkUserId  String         @unique @map("clerk_user_id")
+  fullName     String         @map("full_name")
+  email        String
+  phone        String
+  documentId   String         @map("document_id")
+  vehicleType  VehicleType    @map("vehicle_type")
+  licensePlate String         @map("license_plate")
+  status       OperatorStatus @default(active)
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  assignments DeliveryAssignment[]
+
+  @@index([clerkUserId])
+  @@index([status])
+  @@map("logistics_operators")
+}
+
+// ─── 2. ShippingRate (config) ──────────────────────────────────────────────
+// Tarifaría por (distancia km, peso, service_level).
+// La distancia se calcula con Haversine entre el lat/lng del CP origen y
+// destino (ver src/lib/geo/distance.ts). El motor de matching está en
+// src/lib/quote-engine.ts.
+// Seed: 150 filas (5 rangos km × 10 rangos peso × 3 service_levels), con
+// algunas filas de same_day inactivas para distancias largas.
+
+model ShippingRate {
+  id               String       @id // rat_…
+  carrier          String // "andreani" | "oca" | "propio"
+  serviceLevel     ServiceLevel @map("service_level")
+  distanceKmMin    Int          @map("distance_km_min") // ej. 0
+  distanceKmMax    Int          @map("distance_km_max") // ej. 10
+  weightGramsMin   Int          @map("weight_grams_min")
+  weightGramsMax   Int          @map("weight_grams_max")
+  costCents        Int          @map("cost_cents")
+  estimatedDaysMin Int          @map("estimated_days_min")
+  estimatedDaysMax Int          @map("estimated_days_max")
+  active           Boolean      @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([active, serviceLevel])
+  @@index([distanceKmMin, distanceKmMax])
+  @@map("shipping_rates")
+}
+
+// ─── 3. ShippingQuote ──────────────────────────────────────────────────────
+// Cotización con TTL de 60 minutos. expiresAt se calcula en aplicación al crear.
+// Inmutable una vez creada (sin updatedAt).
+
+model ShippingQuote {
+  id                  String       @id // qte_…
+  sellerProfileId     String       @map("seller_profile_id") // ref opaca a Seller
+  fromAddressSnapshot Json         @map("from_address_snapshot")
+  toAddressSnapshot   Json         @map("to_address_snapshot")
+  serviceLevel        ServiceLevel @map("service_level")
+  carrier             String
+  costCents           Int          @map("cost_cents")
+  currency            String       @default("ARS")
+  weightGramsTotal    Int          @map("weight_grams_total")
+  packagesCount       Int          @map("packages_count")
+  packagesSnapshot    Json         @map("packages_snapshot") // array {weight,length,width,height}
+  estimatedDaysMin    Int          @map("estimated_days_min")
+  estimatedDaysMax    Int          @map("estimated_days_max")
+  idempotencyKey      String?      @unique @map("idempotency_key")
+  expiresAt           DateTime     @map("expires_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  shipments Shipment[]
+
+  @@index([sellerProfileId])
+  @@index([expiresAt])
+  @@map("shipping_quotes")
+}
+
+// ─── 3b. ShipmentGroup (ADR-006: el "pedido completo") ─────────────────────
+// Una orden del comprador con N vendedores genera N Shipment (uno por seller).
+// El ShipmentGroup (1 por order_id) los agrupa y es DUEÑO del tracking GLOBAL:
+//   - trackingNumber ("BMK-…") es el ÚNICO que ve el comprador.
+//   - status es el rollup persistido de los N shipments (recomputeGroupStatus,
+//     src/lib/group-status.ts, reusando rollupShipmentStatus).
+//   - assignedOperatorClerkUserId: el operador toma el PEDIDO ENTERO; este
+//     campo es el guard race-safe de auto-asignación (un solo responsable).
+// Invariante: SIEMPRE existe un grupo, tenga 1 o N vendedores (mono = caso
+// particular del general; sin branching). Cada Shipment conserva su
+// trackingNumber individual ("TRK-AR-…"), que ve solo su vendedor.
+
+model ShipmentGroup {
+  id                      String         @id // grp_…
+  orderId                 String         @unique @map("order_id") // ref opaca a Buyer
+  buyerProfileId          String         @map("buyer_profile_id")
+  trackingNumber          String         @unique @map("tracking_number") // "BMK-…" GLOBAL
+  status                  ShipmentStatus @default(created) // rollup persistido
+  serviceLevel            ServiceLevel   @map("service_level")
+  shippingAddressSnapshot Json           @map("shipping_address_snapshot")
+  originsCount            Int            @default(0) @map("origins_count")
+
+  // Guard de auto-asignación: el operador que primero toma un pickup queda
+  // dueño del grupo entero. null = disponible.
+  assignedOperatorClerkUserId String? @map("assigned_operator_clerk_user_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shipments   Shipment[]
+  assignments DeliveryAssignment[]
+
+  @@index([buyerProfileId])
+  @@index([status])
+  @@map("shipment_groups")
+}
+
+// ─── 4. Shipment (fuente de verdad de shipment_id) ─────────────────────────
+
+model Shipment {
+  id                 String @id // shp_…
+  orderId            String @map("order_id") // ref opaca a Buyer
+  orderSellerGroupId String @map("order_seller_group_id") // ref opaca a Buyer
+  salesOrderId       String @map("sales_order_id") // ref opaca a Seller
+  sellerProfileId    String @map("seller_profile_id")
+  buyerProfileId     String @map("buyer_profile_id")
+
+  // ADR-006: FK al grupo del pedido. El tracking GLOBAL vive en el grupo, no
+  // se denormaliza acá. Cascade: borrar el grupo borra sus shipments.
+  shipmentGroupId String        @map("shipment_group_id")
+  group           ShipmentGroup @relation(fields: [shipmentGroupId], references: [id], onDelete: Cascade)
+
+  shippingQuoteId String?        @map("shipping_quote_id")
+  shippingQuote   ShippingQuote? @relation(fields: [shippingQuoteId], references: [id])
+
+  carrier        String
+  serviceLevel   ServiceLevel   @map("service_level")
+  trackingNumber String         @unique @map("tracking_number") // "TRK-AR-…" del pickup individual (lo ve el vendedor)
+  labelUrl       String         @map("label_url") // sprint 1: placeholder /public/labels/sample.pdf
+  status         ShipmentStatus @default(created)
+
+  weightGramsTotal Int    @map("weight_grams_total")
+  costCents        Int    @map("cost_cents")
+  currency         String @default("ARS")
+
+  shippingAddressSnapshot Json @map("shipping_address_snapshot") // dirección entrega (de Buyer)
+  pickupAddressSnapshot   Json @map("pickup_address_snapshot") // dirección retiro (de Seller)
+
+  idempotencyKey String? @unique @map("idempotency_key")
+
+  shippedAt   DateTime? @map("shipped_at")
+  deliveredAt DateTime? @map("delivered_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  packages       Package[]
+  trackingEvents TrackingEvent[]
+  assignments    DeliveryAssignment[]
+  deliveryProof  DeliveryProof?
+  statusHistory  ShipmentStatusHistory[]
+
+  @@index([orderId])
+  @@index([orderSellerGroupId])
+  @@index([salesOrderId])
+  @@index([sellerProfileId])
+  @@index([buyerProfileId])
+  @@index([shipmentGroupId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("shipments")
+}
+
+// ─── 5. Package ────────────────────────────────────────────────────────────
+// Append-only: se agregan paquetes a un shipment vía POST /shipments/{id}/packages,
+// nunca se editan individualmente (sin updatedAt).
+
+model Package {
+  id         String   @id // pkg_…
+  shipmentId String   @map("shipment_id")
+  shipment   Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  weightGrams Int     @map("weight_grams")
+  lengthCm    Int     @map("length_cm")
+  widthCm     Int     @map("width_cm")
+  heightCm    Int     @map("height_cm")
+  description String?
+  labelUrl    String? @map("label_url") // sprint 1: opcional, suele ser null
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([shipmentId])
+  @@map("packages")
+}
+
+// ─── 6. TrackingEvent ──────────────────────────────────────────────────────
+// Inmutable (sin updatedAt). Cada evento puede o no disparar un cambio de
+// shipment.status; el cambio se valida con assertTransition (lib/transitions.ts, T03).
+
+model TrackingEvent {
+  id         String   @id // evt_…
+  shipmentId String   @map("shipment_id")
+  shipment   Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  eventType  TrackingEventType @map("event_type")
+  location   String?
+  note       String?
+  occurredAt DateTime          @map("occurred_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([shipmentId, occurredAt])
+  @@index([eventType])
+  @@map("tracking_events")
+}
+
+// ─── 7. DeliveryAssignment ─────────────────────────────────────────────────
+// Asignación operador ↔ PEDIDO (ADR-006). El operador toma el grupo entero y
+// se encarga de todos los pickups del pedido. La FK al operador es por
+// clerk_user_id (no por lop_…) porque el JWT entrante eso es lo que trae —
+// evita un lookup extra al resolver "qué operador soy yo".
+//   - shipmentGroupId: nivel real de asignación (el pedido completo).
+//   - shipmentId: nullable/legacy — se conserva para no perder asignaciones
+//     históricas por-envío; las nuevas se crean a nivel grupo.
+
+model DeliveryAssignment {
+  id              String         @id // dla_…
+  shipmentGroupId String?        @map("shipment_group_id")
+  group           ShipmentGroup? @relation(fields: [shipmentGroupId], references: [id], onDelete: Cascade)
+
+  shipmentId String?   @map("shipment_id")
+  shipment   Shipment? @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  operatorClerkUserId String            @map("operator_clerk_user_id")
+  operator            LogisticsOperator @relation(fields: [operatorClerkUserId], references: [clerkUserId])
+
+  status      AssignmentStatus @default(assigned)
+  assignedAt  DateTime         @default(now()) @map("assigned_at")
+  completedAt DateTime?        @map("completed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([shipmentGroupId, status])
+  @@index([shipmentId])
+  @@index([operatorClerkUserId, status])
+  @@map("delivery_assignments")
+}
+
+// ─── 8. DeliveryProof (1:1 con Shipment) ───────────────────────────────────
+// Inmutable. Un shipment tiene a lo sumo un proof (el del delivered).
+// proofPhotoUrl es opcional: en mobile la subida puede fallar por tamaño /
+// permisos de cámara y el operador debe poder cerrar la entrega igual.
+
+model DeliveryProof {
+  id         String   @id // prf_…
+  shipmentId String   @unique @map("shipment_id")
+  shipment   Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  proofPhotoUrl     String?  @map("proof_photo_url")
+  signatureImageUrl String?  @map("signature_image_url")
+  note              String?
+  deliveredAt       DateTime @map("delivered_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("delivery_proofs")
+}
+
+// ─── 9. ShipmentStatusHistory (auditoría) ──────────────────────────────────
+// Inmutable. Cada update a shipment.status agrega una fila acá dentro de la
+// misma prisma.$transaction.
+
+model ShipmentStatusHistory {
+  id         String   @id // ssh_…
+  shipmentId String   @map("shipment_id")
+  shipment   Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  fromStatus ShipmentStatus      @map("from_status")
+  toStatus   ShipmentStatus      @map("to_status")
+  source     StatusHistorySource
+  payload    Json?
+  occurredAt DateTime            @map("occurred_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([shipmentId, occurredAt])
+  @@map("shipment_status_history")
+}
